@@ -10,7 +10,7 @@ use std::process::{Command, Output, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn run_cli(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_omp-topology"))
+    Command::new(env!("CARGO_BIN_EXE_omp-profile"))
         .env_remove("OMP_HOME")
         .env_remove("OMP_PROFILE")
         .env_remove("OMP_TEST_AGENT_DIR")
@@ -20,7 +20,7 @@ fn run_cli(args: &[&str]) -> Output {
         .env_remove("OMP_TEST_EXTERNAL_LOG")
         .args(args)
         .output()
-        .expect("failed to execute omp-topology")
+        .expect("failed to execute omp-profile")
 }
 
 struct TestDir(PathBuf);
@@ -43,7 +43,7 @@ impl TestDir {
         fs::create_dir_all(&home).expect("failed to create isolated HOME");
         fs::create_dir_all(&xdg_config).expect("failed to create isolated XDG_CONFIG_HOME");
 
-        let mut command = Command::new(env!("CARGO_BIN_EXE_omp-topology"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_omp-profile"));
         command
             .current_dir(cwd)
             .env_remove("OMP_HOME")
@@ -124,7 +124,7 @@ fn cli_rejects_legacy_update_alias_before_state_or_target_access() {
     command.env("XDG_STATE_HOME", &blocked_state_home);
     temp.configure_fake_omp(&mut command, &default_agent_dir, true);
 
-    let output = command.output().expect("failed to execute omp-topology");
+    let output = command.output().expect("failed to execute omp-profile");
     assert_eq!(
         output.status.code(),
         Some(2),
@@ -133,7 +133,7 @@ fn cli_rejects_legacy_update_alias_before_state_or_target_access() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("Usage:")
-            && stderr.contains("omp-topology update")
+            && stderr.contains("omp-profile update")
             && stderr.contains("unexpected argument")
             && stderr.contains("--alias"),
         "removed update --alias was not rejected as an unknown clap argument:\n{stderr}"
@@ -174,7 +174,7 @@ fn version_prints_exact_package_version() {
 
     let stdout = String::from_utf8(output.stdout).expect("--version output was not UTF-8");
     assert!(
-        stdout.trim_end() == concat!("omp-topology ", env!("CARGO_PKG_VERSION")),
+        stdout.trim_end() == concat!("omp-profile ", env!("CARGO_PKG_VERSION")),
         "unexpected --version output: {stdout:?}"
     );
 }
@@ -210,7 +210,9 @@ fn install_dry_run_reports_shell_alias_without_creating_it() {
     command.args([
         "install",
         "--topology",
-        "digital-product-studio",
+        "omp-profile-example",
+        "--source",
+        "omp-profile-example/profile",
         "--profile",
         "demo",
         "--alias",
@@ -219,7 +221,7 @@ fn install_dry_run_reports_shell_alias_without_creating_it() {
     ]);
     temp.configure_fake_omp(&mut command, &profile_agent, false);
 
-    let output = command.output().expect("failed to execute omp-topology");
+    let output = command.output().expect("failed to execute omp-profile");
     assert!(
         output.status.success(),
         "install --dry-run failed: {output:?}"
@@ -298,7 +300,7 @@ fn status_does_not_create_missing_profile_directory() {
     command.args(["status", "--profile", "regression", "--json"]);
     temp.configure_fake_omp(&mut command, &profile_agent, true);
 
-    let output = command.output().expect("failed to execute omp-topology");
+    let output = command.output().expect("failed to execute omp-profile");
     assert!(output.status.success(), "status failed: {output:?}");
     assert!(
         !profile_agent.exists(),
@@ -321,7 +323,7 @@ fn remove_dry_run_does_not_create_missing_profile_directory() {
     ]);
     temp.configure_fake_omp(&mut command, &profile_agent, true);
 
-    let output = command.output().expect("failed to execute omp-topology");
+    let output = command.output().expect("failed to execute omp-profile");
     assert!(
         output.status.success(),
         "remove --dry-run failed: {output:?}"
@@ -339,7 +341,7 @@ fn doctor_command_is_registered() {
     command.args(["doctor", "--json"]);
     configure_doctor_omp(&temp, &mut command, &profile_agent, None, false);
 
-    let output = command.output().expect("failed to execute omp-topology");
+    let output = command.output().expect("failed to execute omp-profile");
     assert!(output.status.success(), "doctor --json failed: {output:?}");
     let report: serde_json::Value = serde_json::from_slice(&output.stdout)
         .expect("doctor --json did not emit one JSON document");
@@ -356,7 +358,7 @@ fn completion_command_is_registered() {
         .cli_command(Path::new(env!("CARGO_MANIFEST_DIR")))
         .args(["completions", "bash"])
         .output()
-        .expect("failed to execute omp-topology");
+        .expect("failed to execute omp-profile");
 
     assert!(
         output.status.success(),
@@ -1352,7 +1354,7 @@ fn completion_script(temp: &TestDir, shell: &str, script_path: &Path) {
 }
 
 fn completion_runtime_path(temp: &TestDir) -> std::ffi::OsString {
-    let binary = Path::new(env!("CARGO_BIN_EXE_omp-topology"));
+    let binary = Path::new(env!("CARGO_BIN_EXE_omp-profile"));
     let mut entries = vec![
         binary
             .parent()
@@ -1395,7 +1397,7 @@ fn zsh_completion_candidates(temp: &TestDir, script: &Path, line: &str) -> Strin
     let zsh_dir = temp.0.join("zsh-fpath");
     fs::create_dir_all(temp.0.join("zsh-home")).expect("failed to create isolated Zsh home");
     fs::create_dir_all(&zsh_dir).expect("failed to create temporary Zsh fpath");
-    fs::copy(script, zsh_dir.join("_omp-topology"))
+    fs::copy(script, zsh_dir.join("_omp-profile"))
         .expect("failed to stage Zsh completion in temporary fpath");
     let mut command = shell_command(temp, "zsh", script, line);
     command
@@ -1476,7 +1478,7 @@ COMP_TYPE=9
 read -r -a COMP_WORDS <<< "$COMP_LINE"
 if [[ "$COMP_LINE" == *" " ]]; then COMP_WORDS+=(""); fi
 COMP_CWORD=$((${#COMP_WORDS[@]} - 1))
-registration=$(complete -p omp-topology 2>/dev/null) || exit 82
+registration=$(complete -p omp-profile 2>/dev/null) || exit 82
 read -r -a registration_words <<< "$registration"
 completion_function=""
 for ((i = 0; i < ${#registration_words[@]}; i++)); do
@@ -1657,84 +1659,84 @@ fn completion_actual_bash_fish_zsh_candidates_filter_invalid_combinations() {
         let script = completion_dir.join(format!("{shell}.completion"));
         completion_script(&temp, shell, &script);
         let queries: &[(&str, &[&str], &[&str])] = &[
-            ("omp-topology ", &["doctor", "completions"], &["powershell"]),
+            ("omp-profile ", &["doctor", "completions"], &["powershell"]),
             (
-                "omp-topology completions ",
+                "omp-profile completions ",
                 &["bash", "fish", "zsh"],
                 &["powershell"],
             ),
             (
-                "omp-topology doctor ",
+                "omp-profile doctor ",
                 &["--install-id", "--profile", "--agent-dir", "--json"],
                 &[],
             ),
             (
-                "omp-topology doctor --profile demo ",
+                "omp-profile doctor --profile demo ",
                 &["--json"],
                 &["--install-id", "--agent-dir"],
             ),
             (
-                "omp-topology doctor --json --install-id doctor-profile ",
+                "omp-profile doctor --json --install-id doctor-profile ",
                 &[],
                 &["--profile", "--agent-dir"],
             ),
             (
-                "omp-topology doctor --install-id ",
+                "omp-profile doctor --install-id ",
                 &["doctor-profile", "doctor-explicit"],
                 &["unknown-install"],
             ),
             (
-                "omp-topology doctor --profile ",
+                "omp-profile doctor --profile ",
                 &["demo"],
                 &["missing-profile"],
             ),
             (
-                "omp-topology install --topology fixture --profile demo ",
+                "omp-profile install --topology fixture --profile demo ",
                 &["--alias"],
                 &["--agent-dir"],
             ),
             (
-                "omp-topology install --topology fixture --agent-dir /tmp/target ",
+                "omp-profile install --topology fixture --agent-dir /tmp/target ",
                 &[],
                 &["--profile", "--alias"],
             ),
             (
-                "omp-topology install --topology fixture --config-merge ",
+                "omp-profile install --topology fixture --config-merge ",
                 &["--config-precedence"],
                 &["--config-replace"],
             ),
             (
-                "omp-topology install --topology fixture --config-replace ",
+                "omp-profile install --topology fixture --config-replace ",
                 &[],
                 &["--config-merge", "--config-precedence"],
             ),
             (
-                "omp-topology install --topology fixture ",
+                "omp-profile install --topology fixture ",
                 &["--source"],
                 &["--ref"],
             ),
             (
-                "omp-topology install --topology fixture --source /tmp/source ",
+                "omp-profile install --topology fixture --source /tmp/source ",
                 &["--ref"],
                 &[],
             ),
             (
-                "omp-topology update --install-id doctor-profile ",
+                "omp-profile update --install-id doctor-profile ",
                 &["--source"],
                 &["--ref"],
             ),
             (
-                "omp-topology update --install-id doctor-profile --source /tmp/source ",
+                "omp-profile update --install-id doctor-profile --source /tmp/source ",
                 &[],
                 &["--ref"],
             ),
             (
-                "omp-topology status --install-id doctor-profile ",
+                "omp-profile status --install-id doctor-profile ",
                 &[],
                 &["--profile", "--agent-dir"],
             ),
             (
-                "omp-topology remove --install-id doctor-profile ",
+                "omp-profile remove --install-id doctor-profile ",
                 &[],
                 &["--profile", "--agent-dir"],
             ),
@@ -1810,24 +1812,24 @@ fn completion_update_ref_tracks_effective_source_for_all_shells() {
     let source_arg = source_root.to_string_lossy().into_owned();
     let cases = [
         (
-            "omp-topology update --install-id doctor-profile ".to_string(),
+            "omp-profile update --install-id doctor-profile ".to_string(),
             true,
             "registered GitHub source without override",
         ),
         (
-            "omp-topology update --install-id doctor-explicit ".to_string(),
+            "omp-profile update --install-id doctor-explicit ".to_string(),
             false,
             "registered local source without override",
         ),
         (
-            "omp-topology update --install-id doctor-explicit --source github:test-owner/test-repo "
+            "omp-profile update --install-id doctor-explicit --source github:test-owner/test-repo "
                 .to_string(),
             true,
             "explicit GitHub source override",
         ),
         (
             format!(
-                "omp-topology update --install-id doctor-profile --source {source_arg} "
+                "omp-profile update --install-id doctor-profile --source {source_arg} "
             ),
             false,
             "explicit local source override",

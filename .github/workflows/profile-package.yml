@@ -1,0 +1,68 @@
+name: Profile package validation
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: profile-package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/checkout@v4
+        with:
+          repository: digi4care/omp-profile-installer
+          ref: main
+          path: _installer
+          persist-credentials: false
+
+      - name: Set up Rust to run installer CLI smoke checks
+        uses: dtolnay/rust-toolchain@1.100.0
+
+      - name: Verify required package files
+        run: |
+          set -eu
+          if [ ! -f README.md ]; then
+            echo "missing required package file at profile repository root: README.md" >&2
+            exit 1
+          fi
+          for file in profile/topology.yml profile/CHANGELOG.md; do
+            if [ ! -f "$file" ]; then
+              echo "missing required package file: $file" >&2
+              exit 1
+            fi
+          done
+          if [ ! -d profile/agent ]; then
+            echo "missing required package directory: profile/agent/" >&2
+            exit 1
+          fi
+
+      - name: Verify listed profile metadata
+        run: |
+          set -eu
+          cargo run --locked --manifest-path _installer/Cargo.toml -- \
+            list --source "$GITHUB_WORKSPACE/profile" --json > "$RUNNER_TEMP/profile-list.json"
+          ruby -ryaml -rjson -e '
+            manifest = YAML.safe_load(File.read("profile/topology.yml"))
+            abort "profile/topology.yml must be a mapping" unless manifest.is_a?(Hash)
+            expected = %w[name version description].to_h { |key| [key, manifest.fetch(key, "").to_s] }
+            entries = JSON.parse(File.read(ENV.fetch("RUNNER_TEMP") + "/profile-list.json")).fetch("topologies", [])
+            abort "expected exactly one listed profile, got #{entries.length}" unless entries.length == 1
+            expected.each do |key, value|
+              abort "listed #{key} mismatch: expected #{value.inspect}, got #{entries[0][key].inspect}" unless entries[0][key] == value
+            end
+          '
+
+      - name: Dry-run profile installation
+        run: |
+          set -eu
+          slug="$(ruby -ryaml -e 'print YAML.safe_load(File.read("profile/topology.yml")).fetch("name")')"
+          cargo run --locked --manifest-path _installer/Cargo.toml -- \
+            install -t "$slug" --source "$GITHUB_WORKSPACE/profile" --dry-run \
+            --agent-dir "$RUNNER_TEMP/agent"

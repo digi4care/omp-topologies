@@ -1,6 +1,7 @@
-# Ignore the local Beads workspace and all of its contents.
-.beads/
-
+# Ignore local Beads workspace state but keep the shared export and project config.
+.beads/*
+!.beads/config.yaml
+!.beads/issues.jsonl
 # Node.js / TypeScript / JavaScript
 node_modules/
 .npm/
@@ -54,5 +55,3 @@ Thumbs.db
 # Local external-project symlink
 /AI-Story
 
-# Local-only per-topology docs (design records, plans); root docs/ stays tracked
-/topologies/*/docs/

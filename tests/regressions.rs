@@ -43,7 +43,7 @@ fn command(temp: &TestDir) -> Command {
     let xdg_config = temp.0.join("xdg-config");
     fs::create_dir_all(&home).expect("failed to create isolated HOME");
     fs::create_dir_all(&xdg_config).expect("failed to create isolated XDG_CONFIG_HOME");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_omp-topology"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_omp-profile"));
     command
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .env("HOME", home)
@@ -56,7 +56,7 @@ fn run(temp: &TestDir, args: &[&str]) -> Output {
     command(temp)
         .args(args)
         .output()
-        .expect("failed to execute omp-topology")
+        .expect("failed to execute omp-profile")
 }
 
 fn run_for_agent(temp: &TestDir, agent_dir: &Path, args: &[&str]) -> Output {
@@ -65,7 +65,7 @@ fn run_for_agent(temp: &TestDir, agent_dir: &Path, args: &[&str]) -> Output {
         .arg("--agent-dir")
         .arg(agent_dir)
         .output()
-        .expect("failed to execute omp-topology")
+        .expect("failed to execute omp-profile")
 }
 
 fn assert_success(output: &Output) {
@@ -485,7 +485,7 @@ fn remove_rolls_back_deleted_files_when_config_rewrite_fails() {
         .env("HOME", home)
         .env("XDG_CONFIG_HOME", xdg_config)
         .env("XDG_STATE_HOME", temp.state_home())
-        .env("OMP_TOPOLOGY_BINARY", env!("CARGO_BIN_EXE_omp-topology"))
+        .env("OMP_TOPOLOGY_BINARY", env!("CARGO_BIN_EXE_omp-profile"))
         .args(["remove", "--topology", TOPOLOGY, "--agent-dir"])
         .arg(&agent_dir)
         .output()
@@ -1538,27 +1538,30 @@ fn second_alias_rejects_byte_identical_shared_file_without_mutation() {
 
 #[test]
 fn checked_in_digital_product_studio_alias_collisions_fail_closed_in_both_orders() {
-    let source_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let temp = TestDir::new();
+    let source_root = temp.0.join("collision-source");
+    write_topology(
+        &source_root,
+        "collision-a",
+        "task:\n  eager: true\n",
+        &[("RULES.md", b"collision fixture rules\n")],
+    );
+    write_topology(
+        &source_root,
+        "collision-b",
+        "task:\n  eager: true\n",
+        &[("RULES.md", b"collision fixture rules\n")],
+    );
     for (first_topology, first_alias, second_topology, second_alias) in [
-        (
-            "digital-product-studio",
-            "dps-owner",
-            "digital-product-studio-plus",
-            "dps-plus-owner",
-        ),
-        (
-            "digital-product-studio-plus",
-            "dps-plus-owner",
-            "digital-product-studio",
-            "dps-owner",
-        ),
+        ("collision-a", "collision-a-owner", "collision-b", "collision-b-owner"),
+        ("collision-b", "collision-b-owner", "collision-a", "collision-a-owner"),
     ] {
         let temp = TestDir::new();
         let agent_dir = temp.0.join("shared-agent");
         let first_install = install_source(
             &temp,
             &agent_dir,
-            source_root,
+            &source_root,
             first_topology,
             Some(first_alias),
             false,
@@ -1600,18 +1603,18 @@ fn checked_in_digital_product_studio_alias_collisions_fail_closed_in_both_orders
         assert_eq!(
             file_snapshot(&agent_dir),
             target_before,
-            "rejected real-topology dry-run changed target files"
+            "rejected synthetic-topology dry-run changed target files"
         );
         assert_eq!(
             file_snapshot(&state_root),
             state_before,
-            "rejected real-topology dry-run changed registry or manifests"
+            "rejected synthetic-topology dry-run changed registry or manifests"
         );
 
         let rejected = install_source(
             &temp,
             &agent_dir,
-            source_root,
+            &source_root,
             second_topology,
             Some(second_alias),
             false,
@@ -1629,12 +1632,12 @@ fn checked_in_digital_product_studio_alias_collisions_fail_closed_in_both_orders
         assert_eq!(
             file_snapshot(&agent_dir),
             target_before,
-            "rejected real-topology install changed target files"
+            "rejected synthetic-topology install changed target files"
         );
         assert_eq!(
             file_snapshot(&state_root),
             state_before,
-            "rejected real-topology install changed registry or manifests"
+            "rejected synthetic-topology install changed registry or manifests"
         );
         assert_eq!(
             fs::read(&first_manifest).expect("rejected install changed first alias manifest"),
@@ -3308,7 +3311,7 @@ fn run_with_fake_curl(temp: &TestDir, args: &[&str], bin: &Path, marker: &Path) 
         .env("OMP_TOPOLOGY_TEST_CURL_MARKER", marker)
         .args(args)
         .output()
-        .expect("failed to execute omp-topology")
+        .expect("failed to execute omp-profile")
 }
 
 #[cfg(all(
@@ -3342,7 +3345,7 @@ fn pinned_self_update_dry_run_returns_plan_without_downloading() {
     }));
     assert!(lines.iter().any(|line| {
         line.as_str().is_some_and(|line| {
-            line.contains("dry-run: would download and verify omp-topology-1.2.3-")
+            line.contains("dry-run: would download and verify omp-profile-1.2.3-")
         })
     }));
     assert!(lines.iter().any(|line| {

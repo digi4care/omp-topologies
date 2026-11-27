@@ -95,12 +95,12 @@ fn fail(message: impl std::fmt::Display) -> CliError {
 }
 
 /// Where an install came from: a pinned GitHub repository or a local path
-/// that contains `topologies/`.
+/// containing a root package or legacy catalog.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SourceSpec {
     /// `github:OWNER/REPO`.
     GitHub { owner: String, repo: String },
-    /// Local checkout containing `topologies/`.
+    /// Local source path containing a root package or legacy catalog.
     Local { path: PathBuf },
 }
 
@@ -448,7 +448,7 @@ impl RegistryLock {
                     if start.elapsed() >= LOCK_TIMEOUT {
                         return Err(fail(format!(
                             "registry is locked by another process (lock file \
-                             '{}'); if no other omp-topology process is \
+                             '{}'); if no other omp-profile process is \
                              running, remove the lock file manually",
                             path.display()
                         )));

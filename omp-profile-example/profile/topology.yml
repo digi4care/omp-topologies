@@ -1,0 +1,4 @@
+name: omp-profile-example
+version: 1.0.0
+description: Minimal standalone OMP profile package used to demonstrate the installer.
+installable: true

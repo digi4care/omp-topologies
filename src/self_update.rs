@@ -1,9 +1,9 @@
-//! Self-update: replace the running `omp-topology` binary with the signed
+//! Self-update: replace the running `omp-profile` binary with the signed
 //! GitHub Release of the same tool.
 //!
 //! Trust model (mirrors `RELEASING.md`): every release of
-//! `digi4care/omp-topologies` publishes per-target tarballs named
-//! `omp-topology-${VERSION}-${TARGET}.tar.gz`, a `SHA256SUMS` manifest
+//! `digi4care/omp-profile-installer` publishes per-target tarballs named
+//! `omp-profile-${VERSION}-${TARGET}.tar.gz`, a `SHA256SUMS` manifest
 //! listing those exact archive names, and a detached RSA/SHA-256 signature
 //! `SHA256SUMS.sig` over that manifest. The public half of the release key
 //! is committed at `keys/omp-topology-release-public.pem` and embedded in
@@ -18,7 +18,7 @@
 //!    `openssl dgst -sha256 -verify`,
 //! 3. the selected tarball's SHA-256, computed in-process with the `sha2`
 //!    crate, matches the manifest entry for its exact asset name,
-//! 4. the archive extracts to a single `omp-topology` binary that runs and
+//! 4. the archive extracts to a single `omp-profile` binary that runs and
 //!    reports the resolved version.
 //!
 //! Only then is the current executable replaced, atomically, by renaming a
@@ -57,7 +57,7 @@ use sha2::{Digest, Sha256};
 use crate::error::{CliError, io_err};
 
 /// Repository that publishes signed releases.
-const REPO: &str = "digi4care/omp-topologies";
+const REPO: &str = "digi4care/omp-profile-installer";
 
 /// Public half of the release signing key, committed in the repository and
 /// embedded at compile time so an installed binary needs no checkout.
@@ -65,11 +65,11 @@ const RELEASE_KEY_PEM: &str = include_str!("../keys/omp-topology-release-public.
 
 /// GitHub API endpoint for the latest release (HTTPS only).
 const LATEST_RELEASE_API: &str =
-    "https://api.github.com/repos/digi4care/omp-topologies/releases/latest";
+    "https://api.github.com/repos/digi4care/omp-profile-installer/releases/latest";
 
 /// `User-Agent` required by the GitHub API, sent on the latest-release
 /// query.
-const API_USER_AGENT: &str = "User-Agent: omp-topology-self-update";
+const API_USER_AGENT: &str = "User-Agent: omp-profile-self-update";
 
 /// Seconds curl waits to establish a TCP/TLS connection before giving up.
 /// Every curl invocation (API query and downloads alike) gets this.
@@ -118,7 +118,7 @@ pub fn run(
 
     if version == current_version {
         lines.push(format!(
-            "omp-topology is already at v{version} (the {} release)",
+            "omp-profile is already at v{version} (the {} release)",
             if version_override.is_some() {
                 "requested"
             } else {
@@ -216,11 +216,11 @@ pub fn run(
         ],
         "extract the release archive",
     )?;
-    let candidate = extract_dir.join("omp-topology");
+    let candidate = extract_dir.join("omp-profile");
     if !candidate.is_file() {
         return Err(CliError::Usage(format!(
             "release archive {asset} does not contain the expected \
-             'omp-topology' binary; refusing to update"
+             'omp-profile' binary; refusing to update"
         )));
     }
     make_executable(&candidate)?;
@@ -354,7 +354,7 @@ fn download_base(version: &str) -> String {
 
 /// Exact release asset name for a validated version and known target.
 fn asset_name(version: &str, target: &str) -> String {
-    format!("omp-topology-{version}-{target}.tar.gz")
+    format!("omp-profile-{version}-{target}.tar.gz")
 }
 
 /// Download `url` to `dest` with curl, HTTPS only. The URL is constructed
@@ -486,7 +486,7 @@ fn candidate_version(candidate: &Path) -> Result<String, CliError> {
     )?;
     if !output.status.success() {
         return Err(tool_failure(
-            "omp-topology (downloaded candidate)",
+            "omp-profile (downloaded candidate)",
             "run the downloaded binary with --version",
             &output,
         ));
@@ -549,7 +549,7 @@ fn replace_current(
     sync_dir(dir);
 
     lines.push(format!(
-        "updated omp-topology v{current_version} → v{version} at {}",
+        "updated omp-profile v{current_version} → v{version} at {}",
         current.display()
     ));
     Ok(())
@@ -568,7 +568,7 @@ fn stage_candidate(
     let mut source = fs::File::open(candidate).map_err(|err| io_err(candidate, err))?;
     for attempt in 0..100u32 {
         let staging = dir.join(format!(
-            ".omp-topology-self-update-{}-{}-{attempt}",
+            ".omp-profile-self-update-{}-{}-{attempt}",
             std::process::id(),
             now_nanos()
         ));
@@ -711,7 +711,7 @@ impl TempWorkDir {
         let base = std::env::temp_dir();
         for attempt in 0..100u32 {
             let path = base.join(format!(
-                "omp-topology-self-update-{}-{}-{attempt}",
+                "omp-profile-self-update-{}-{}-{attempt}",
                 std::process::id(),
                 now_nanos()
             ));

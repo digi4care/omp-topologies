@@ -217,8 +217,8 @@ pub fn run(opts: &UpdateOptions<'_>, out: &mut Vec<String>) -> Result<i32, CliEr
     // Capture the resolved commit before anything can fail so every
     // cleanup path below can retain this exact checkout.
     let resolved_commit = checkout.commit.clone();
-    // find_topology and install::run join `topologies/`
-    // internally, so pass the source-tree root here.
+    // find_topology resolves either a root package or one catalog entry;
+    // pass it the original source root.
     let topology_dir = match topology::find_topology(&checkout.root, &entry.topology, true) {
         Ok(dir) => dir,
         Err(err) => {

@@ -94,7 +94,7 @@ fn cli_command(temp: &TestDir, cwd: &Path) -> Command {
     fs::create_dir_all(&home).expect("failed to create isolated HOME");
     fs::create_dir_all(&xdg_config).expect("failed to create isolated XDG_CONFIG_HOME");
 
-    let mut command = Command::new(env!("CARGO_BIN_EXE_omp-topology"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_omp-profile"));
     command
         .current_dir(cwd)
         .env_remove("OMP_HOME")
@@ -106,12 +106,17 @@ fn cli_command(temp: &TestDir, cwd: &Path) -> Command {
 }
 
 fn run_cli_at(temp: &TestDir, agent_dir: &Path, cwd: &Path, args: &[&str]) -> Output {
-    cli_command(temp, cwd)
-        .args(args)
+    let mut command = cli_command(temp, cwd);
+    command.args(args);
+    if args.first() == Some(&"install") && !args.contains(&"--source") {
+        let source = default_legacy_source(temp);
+        command.arg("--source").arg(source);
+    }
+    command
         .arg("--agent-dir")
         .arg(agent_dir)
         .output()
-        .expect("failed to execute omp-topology")
+        .expect("failed to execute omp-profile")
 }
 
 fn run_cli(temp: &TestDir, agent_dir: &Path, args: &[&str]) -> Output {
@@ -124,15 +129,39 @@ fn run_cli_with_skills(
     skills_dir: &Path,
     args: &[&str],
 ) -> Output {
-    cli_command(temp, Path::new(env!("CARGO_MANIFEST_DIR")))
-        .args(args)
+    let mut command = cli_command(temp, Path::new(env!("CARGO_MANIFEST_DIR")));
+    command.args(args);
+    if args.first() == Some(&"install") && !args.contains(&"--source") {
+        let source = default_legacy_source(temp);
+        command.arg("--source").arg(source);
+    }
+    command
         .arg("--skills-dir")
         .arg(skills_dir)
         .arg("--agent-dir")
         .arg(agent_dir)
         .output()
-        .expect("failed to execute omp-topology")
+        .expect("failed to execute omp-profile")
 }
+
+fn default_legacy_source(temp: &TestDir) -> PathBuf {
+    local_topology_source(
+        temp,
+        "task:\n  eager: always\n  autoParallel: true\n  maxConcurrency: 4\n  maxRecursionDepth: 2\ntool:\n  web:\n    enabled: true\n    merge: patch\n",
+        &[
+            ("RULES.md", b"# Installer fixture rules\n"),
+            (
+                "skills/marketing-charter/SKILL.md",
+                b"# Marketing charter fixture\n",
+            ),
+            (
+                "agents/marketing.md",
+                b"---\nname: marketing\n---\nInstaller test fixture.\n",
+            ),
+        ],
+    )
+}
+
 fn local_topology_source(temp: &TestDir, config: &str, files: &[(&str, &[u8])]) -> PathBuf {
     local_named_topology_source(temp, "source", TOPOLOGY, config, files)
 }
@@ -164,6 +193,7 @@ fn local_named_topology_source(
     }
     source
 }
+
 
 #[cfg(unix)]
 fn run_cli_with_fake_omp(
@@ -210,7 +240,7 @@ fn run_cli_with_fake_omp(
         .env("OMP_TEST_PROFILE", profile_name)
         .env("OMP_TEST_PROFILE_AGENT_DIR", profile_agent_dir)
         .output()
-        .expect("failed to execute omp-topology")
+        .expect("failed to execute omp-profile")
 }
 
 fn install_from_source(
@@ -276,7 +306,7 @@ fn run_install_from_source_with_path(
     if dry_run {
         command.arg("--dry-run");
     }
-    command.output().expect("failed to execute omp-topology")
+    command.output().expect("failed to execute omp-profile")
 }
 
 #[cfg(unix)]
@@ -1717,9 +1747,17 @@ fn remove_does_not_prune_an_external_directory_through_a_symlinked_parent() {
 }
 
 #[test]
-fn list_and_install_resolve_topology_source_outside_the_checkout() {
+fn list_and_install_resolve_legacy_catalog_source_outside_the_caller_directory() {
     let temp = TestDir::new();
+
     let outside_cwd = temp.0.join("outside-cwd");
+    let source = local_named_topology_source(
+        &temp,
+        "legacy-catalog",
+        TOPOLOGY,
+        "task:\n  eager: always\n  autoParallel: true\n",
+        &[("catalog.md", b"legacy catalog payload\n")],
+    );
     let decoy_topology = outside_cwd.join("topologies").join(TOPOLOGY);
     fs::create_dir_all(decoy_topology.join("agent")).expect("failed to create decoy topology");
     fs::write(
@@ -1737,16 +1775,17 @@ fn list_and_install_resolve_topology_source_outside_the_checkout() {
         "wrong topology source\n",
     )
     .expect("failed to seed decoy topology file");
+    let source_arg = source.to_str().expect("fixture source path is not UTF-8");
 
     let listing = cli_command(&temp, &outside_cwd)
-        .arg("list")
+        .args(["list", "--source", source_arg])
         .output()
-        .expect("failed to execute omp-topology list");
+        .expect("failed to execute omp-profile list");
     assert_success(&listing);
     let listing_text = String::from_utf8_lossy(&listing.stdout);
     assert!(
-        listing_text.contains("digital-product-studio 2.0.1"),
-        "list did not use the source checkout topology:\n{listing_text}"
+        listing_text.contains("digital-product-studio 1.0.0"),
+        "list did not use the supplied legacy catalog:\n{listing_text}"
     );
     assert!(
         !listing_text.contains("9.9.9"),
@@ -1758,27 +1797,171 @@ fn list_and_install_resolve_topology_source_outside_the_checkout() {
         &temp,
         &agent_dir,
         &outside_cwd,
-        &["install", "-t", TOPOLOGY],
+        &["install", "-t", TOPOLOGY, "--source", source_arg],
     );
     assert_success(&installed);
     assert!(
-        agent_dir.join("agents/marketing.md").is_file(),
-        "install did not use the source checkout's topology files"
+        agent_dir.join("catalog.md").is_file(),
+        "install did not use the supplied legacy catalog files"
     );
     assert!(
         !agent_dir.join("decoy.md").exists(),
         "install used topology files from the caller's working directory"
     );
     let config = fs::read_to_string(agent_dir.join("config.yml"))
-        .expect("install did not create config from the source checkout");
+        .expect("install did not create config from the legacy catalog");
     assert!(
         config.contains("autoParallel: true"),
-        "install did not use the source checkout's topology config:\n{config}"
+        "install did not use the supplied legacy catalog config:\n{config}"
     );
     assert!(
         !config.contains("decoy: true"),
         "install used topology config from the caller's working directory:\n{config}"
     );
+}
+
+#[test]
+fn example_profile_package_lists_and_installs_from_nested_source() {
+    let temp = TestDir::new();
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("omp-profile-example/profile");
+    let source_arg = source.to_str().expect("example source path is not UTF-8");
+
+    let listing = run_cli_without_agent_dir(&temp, &["list", "--source", source_arg, "--json"]);
+    assert_success(&listing);
+    let listing: serde_json::Value =
+        serde_json::from_slice(&listing.stdout).expect("list output is not valid JSON");
+    let packages = listing["topologies"]
+        .as_array()
+        .expect("list output omitted the package array");
+    assert_eq!(packages.len(), 1, "list should expose only the example package");
+    assert_eq!(packages[0]["name"], "omp-profile-example");
+    assert_eq!(packages[0]["version"], "1.0.0");
+    assert_eq!(
+        packages[0]["description"],
+        "Minimal standalone OMP profile package used to demonstrate the installer."
+    );
+
+    let agent_dir = temp.0.join("fresh-agent");
+    assert!(!agent_dir.exists(), "test target unexpectedly exists");
+    let installed = run_cli(
+        &temp,
+        &agent_dir,
+        &[
+            "install",
+            "-t",
+            "omp-profile-example",
+            "--source",
+            source_arg,
+        ],
+    );
+    assert_success(&installed);
+    assert_eq!(
+        fs::read_to_string(agent_dir.join("RULES.md"))
+            .expect("install did not copy the example profile payload"),
+        fs::read_to_string(source.join("agent/RULES.md"))
+            .expect("example profile payload is missing")
+    );
+}
+
+#[test]
+fn list_and_install_resolve_root_level_topology_source() {
+    let temp = TestDir::new();
+    let source = temp.0.join("root-package");
+    let agent = source.join("agent");
+    fs::create_dir_all(&agent).expect("failed to create root-level package agent directory");
+    fs::write(
+        source.join("topology.yml"),
+        "name: root-package-contract\n\
+         version: 1.0.0\n\
+         description: root-level source fixture\n\
+         installable: true\n",
+    )
+    .expect("failed to write root-level package metadata");
+    fs::write(agent.join("config.yml"), "rootPackageContract: true\n")
+        .expect("failed to write root-level package config");
+    fs::write(agent.join("contract.md"), "root-level package payload\n")
+        .expect("failed to write root-level package payload");
+
+    let source_arg = source.to_str().expect("local source path is not UTF-8");
+    let listing = run_cli_without_agent_dir(
+        &temp,
+        &["list", "--source", source_arg, "--json"],
+    );
+    assert_success(&listing);
+    let listing: serde_json::Value =
+        serde_json::from_slice(&listing.stdout).expect("list output is not valid JSON");
+    let packages = listing["topologies"]
+        .as_array()
+        .expect("list output omitted the package array");
+    assert_eq!(packages.len(), 1, "list should expose only the root package");
+    assert_eq!(packages[0]["name"], "root-package-contract");
+    assert_eq!(packages[0]["version"], "1.0.0");
+
+    let agent_dir = temp.0.join("installed-agent");
+    let installed = run_cli(
+        &temp,
+        &agent_dir,
+        &[
+            "install",
+            "-t",
+            "root-package-contract",
+            "--source",
+            source_arg,
+        ],
+    );
+    assert_success(&installed);
+    assert_eq!(
+        fs::read_to_string(agent_dir.join("contract.md"))
+            .expect("install did not copy the root-level package payload"),
+        "root-level package payload\n"
+    );
+    let config = fs::read_to_string(agent_dir.join("config.yml"))
+        .expect("install did not create config from the root-level package");
+    assert!(config.contains("rootPackageContract: true"), "{config}");
+}
+
+#[test]
+fn list_and_install_without_source_require_explicit_source_before_mutation() {
+    let temp = TestDir::new();
+    let agent_dir = temp.0.join("agent");
+    fs::create_dir_all(&agent_dir).expect("failed to create target agent directory");
+    fs::write(agent_dir.join("existing.md"), "preserve this file\n")
+        .expect("failed to seed target agent directory");
+    let target_before = file_snapshot(&agent_dir);
+    let state_before = file_snapshot(&temp.state_home());
+
+    for args in [&["list", "--json"][..], &["install", "-t", TOPOLOGY][..]] {
+        let mut command = cli_command(&temp, Path::new(env!("CARGO_MANIFEST_DIR")));
+        command.args(args);
+        if args[0] == "install" {
+            command.arg("--agent-dir").arg(&agent_dir);
+        }
+        let output = command.output().expect("failed to execute omp-profile");
+        let text = output_text(&output);
+
+        assert!(
+            !output.status.success(),
+            "{} without --source unexpectedly succeeded:\n{text}",
+            args[0]
+        );
+        assert!(
+            text.contains("--source"),
+            "{} rejection did not explain how to provide --source:\n{text}",
+            args[0]
+        );
+        assert_eq!(
+            file_snapshot(&agent_dir),
+            target_before,
+            "{} without --source mutated the target directory",
+            args[0]
+        );
+        assert_eq!(
+            file_snapshot(&temp.state_home()),
+            state_before,
+            "{} without --source mutated installer state",
+            args[0]
+        );
+    }
 }
 
 #[test]
@@ -1902,7 +2085,7 @@ fn install_dry_run_accepts_legacy_config_file_existed_boolean() {
     let ownership: serde_json::Value =
         serde_json::from_slice(&fs::read(&manifest).expect("ownership manifest is missing"))
             .expect("ownership manifest is not valid JSON");
-    assert_eq!(ownership["topology_version"], "2.0.1");
+    assert_eq!(ownership["topology_version"], "1.0.0");
     assert_eq!(
         ownership["config"]["prior"]["[\"task\", \"eager\"]"]["value"], "always",
         "fixture lacks valid prior config ownership"
@@ -2150,11 +2333,9 @@ fn install_rejects_an_identical_but_unowned_topology_file() {
     fs::create_dir_all(&agent_dir).expect("failed to create isolated agent directory");
     fs::write(&config, original_config).expect("failed to seed config.yml");
 
-    let source = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("topologies")
-        .join(TOPOLOGY)
+    let source = default_legacy_source(&temp).join("topologies").join(TOPOLOGY)
         .join("agent/agents/marketing.md");
-    let source_bytes = fs::read(source).expect("failed to read topology source file");
+    let source_bytes = fs::read(source).expect("failed to read fixture topology source file");
     let collision = agent_dir.join("agents/marketing.md");
     fs::create_dir_all(collision.parent().expect("collision has no parent"))
         .expect("failed to create collision directory");
@@ -2730,7 +2911,7 @@ fn cli_guidance_overlapping_topology_refusal_preserves_state_and_guides_recovery
         ),
         (
             "exact existing-install-ID update command",
-            diagnostics.contains("omp-topology update --install-id omp-dps"),
+            diagnostics.contains("omp-profile update --install-id omp-dps"),
         ),
         (
             "update keeps the existing topology",
@@ -2851,7 +3032,7 @@ fn cli_guidance_symlinked_skills_dir_refusal_has_no_cross_topology_guidance() {
         "unrelated skills-directory refusal received cross-topology guidance:\n{diagnostics}"
     );
     assert!(
-        !diagnostics.contains("omp-topology update --install-id"),
+        !diagnostics.contains("omp-profile update --install-id"),
         "unrelated skills-directory refusal received an update command:\n{diagnostics}"
     );
     assert_eq!(file_snapshot(&default_agent_dir), target_before);
@@ -2959,11 +3140,11 @@ fn cli_guidance_multi_owner_collision_names_file_owner_install_id() {
         "refusal did not identify the colliding file:\n{diagnostics}"
     );
     assert!(
-        diagnostics.contains("omp-topology update --install-id omp-zeta"),
+        diagnostics.contains("omp-profile update --install-id omp-zeta"),
         "guidance did not name the install ID that owns the colliding file:\n{diagnostics}"
     );
     assert!(
-        !diagnostics.contains("omp-topology update --install-id omp-alpha"),
+        !diagnostics.contains("omp-profile update --install-id omp-alpha"),
         "guidance incorrectly named the lexicographically first, non-owning install ID:\n{diagnostics}"
     );
     assert_eq!(file_snapshot(&default_agent_dir), target_before);
@@ -3245,8 +3426,10 @@ fn default_target_comes_from_omp_config_path() {
     )
     .expect("failed to build isolated PATH");
 
+    let source = default_legacy_source(&temp);
     let output = cli_command(&temp, Path::new(env!("CARGO_MANIFEST_DIR")))
-        .args(["install", "-t", TOPOLOGY])
+        .args(["install", "-t", TOPOLOGY, "--source"])
+        .arg(source)
         .env("PATH", path)
         .env("OMP_TEST_AGENT_DIR", &active_dir)
         .output()
@@ -3347,7 +3530,7 @@ fn run_cli_without_agent_dir(temp: &TestDir, args: &[&str]) -> Output {
     cli_command(temp, Path::new(env!("CARGO_MANIFEST_DIR")))
         .args(args)
         .output()
-        .expect("failed to execute omp-topology")
+        .expect("failed to execute omp-profile")
 }
 
 #[test]

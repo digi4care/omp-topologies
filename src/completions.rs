@@ -16,7 +16,7 @@ use crate::{Cli, profiles, registry, state_anchor};
 pub(crate) fn script(shell: &str) -> Option<&'static str> {
     match shell {
         "bash" => Some(
-            r#"_omp_topology_complete() {
+            r#"_omp_profile_complete() {
     local candidate
     # COMP_WORDBREAKS splits values such as https://github.com/acme/repo
     # into fragments (https : / / github.com / acme / repo) that the
@@ -134,13 +134,13 @@ pub(crate) fn script(shell: &str) -> Option<&'static str> {
     COMPREPLY=()
     while IFS= read -r -d '' candidate; do
         COMPREPLY+=("$candidate")
-    done < <(command omp-topology __complete -- "${words[@]}")
+    done < <(command omp-profile __complete -- "${words[@]}")
 }
-complete -o nosort -o filenames -F _omp_topology_complete omp-topology
+complete -o nosort -o filenames -F _omp_profile_complete omp-profile
 "#,
         ),
         "fish" => Some(
-            r#"function __omp_topology_complete
+            r#"function __omp_profile_complete
     # `commandline -opc` prints one raw token per line, so command
     # substitution cannot frame a completed token that contains an embedded
     # newline: the token splits into several words and a line such as
@@ -320,13 +320,13 @@ complete -o nosort -o filenames -F _omp_topology_complete omp-topology
     if test (count $current) -eq 0
         set current ''
     end
-    command omp-topology __complete -- $words "$current" | string split0
+    command omp-profile __complete -- $words "$current" | string split0
 end
-complete -c omp-topology -f -a '(__omp_topology_complete)'
+complete -c omp-profile -f -a '(__omp_profile_complete)'
 "#,
         ),
         "zsh" => Some(
-            r#"#compdef omp-topology
+            r#"#compdef omp-profile
 
 local candidate
 local -a candidates completion_words
@@ -334,7 +334,7 @@ completion_words=("${(@)words[2,CURRENT]}")
 candidates=()
 while IFS= read -r -d "" candidate; do
     candidates+=("$candidate")
-done < <(command omp-topology __complete -- "${completion_words[@]}")
+done < <(command omp-profile __complete -- "${completion_words[@]}")
 compadd -- "${candidates[@]}"
 "#,
         ),
@@ -404,9 +404,9 @@ pub(crate) fn complete(words: Vec<OsString>) {
 fn normalize_words(mut words: Vec<OsString>) -> Vec<OsString> {
     let command_is_present = words
         .first()
-        .is_some_and(|word| Path::new(word).file_name() == Some(OsStr::new("omp-topology")));
+        .is_some_and(|word| Path::new(word).file_name() == Some(OsStr::new("omp-profile")));
     if !command_is_present {
-        words.insert(0, OsString::from("omp-topology"));
+        words.insert(0, OsString::from("omp-profile"));
     }
     words
 }

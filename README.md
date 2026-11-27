@@ -3,8 +3,10 @@
 <br>
 
 ### omp-topologies
+Repository: [`digi4care/omp-profile-installer`](https://github.com/digi4care/omp-profile-installer)<br>
 **Versioned, self-contained topology overlays for [OMP](https://github.com/can1357/oh-my-pi) agent profiles**<br>
-The `omp-topology` CLI discovers topologies in a source tree and installs them into
+The executable is `omp-profile`; environment variable names remain `OMP_TOPOLOGY_*`.<br>
+The `omp-profile` CLI discovers topologies in a source tree and installs them into
 named OMP profiles: a signed-release bootstrap for the CLI itself, dry-runnable
 and reversible installs, an install registry with OMP shell-shortcut support,
 and signature-verified self-update — with no server to run and no sudo required.
@@ -43,7 +45,7 @@ and signature-verified self-update — with no server to run and no sudo require
 <td valign="top" width="33%">
 
 **Operations**
-- [📖 How the Installer Works](docs/installer.md)
+- [📖 How the Installer Works](docs/installer-guide.md)
 - [⚙️ Installing and Updating the CLI](#️-installing-and-updating-the-cli)
 - [📦 Topology Versioning and Updates](#-topology-versioning-and-updates)
 - [🧱 Project Structure](#-project-structure)
@@ -70,9 +72,12 @@ and signature-verified self-update — with no server to run and no sudo require
 <td width="33%" valign="top">
 
 ### 🗂️ Topology discovery
-`omp-topology list` reads every `topologies/<name>/topology.yml`
-in a source tree and reports name, version, and description —
-with `--json` for machine-readable output.
+`omp-profile list --source <source>` reads installable packages from either
+a root-level `topology.yml` + `agent/` package or a legacy
+`topologies/<name>/topology.yml` entry in an explicitly selected source.
+The installer repository includes profiles under `topologies/`; select it
+explicitly with `--source` to list or install those profiles. Output includes
+name, version, and description, with `--json` for machine-readable output.
 
 </td>
 <td width="33%" valign="top">
@@ -204,8 +209,8 @@ installed files and prior config values. A cross-agent install registry lives
 under the XDG state root. One install request flows like this:
 
 ```
-$ omp-topology install -t digital-product-studio \
-    --source github:digi4care/omp-topologies --profile digital-product-studio
+$ omp-profile install -t digital-product-studio \
+    --source github:digi4care/omp-profile-installer --profile digital-product-studio
         │
         ▼
 src/main.rs       clap parse; resolve target profile via
@@ -216,8 +221,9 @@ src/source.rs     resolve github: source → git checkout pinned to a
                   40-hex commit (persistent cache, or ephemeral for --dry-run)
         │
         ▼
-src/topology.rs   locate topologies/<name>, parse topology.yml,
-                  walk the agent/ overlay (symlinks rejected)
+src/topology.rs   locate a root-level topology.yml package or legacy
+                  topologies/<name>, parse manifest and walk agent/
+                  overlay (symlinks rejected)
         │
         ▼
 src/install.rs    plan every change, refuse collisions, then apply in one
@@ -245,12 +251,12 @@ Install the CLI with the signed-release bootstrap (needs `curl`, `openssl`,
 `tar`, and `sha256sum`/`shasum`; installs into `~/.local/bin` by default, no sudo):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/digi4care/omp-topologies/main/scripts/install-release.sh | sh
+curl -fsSL https://raw.githubusercontent.com/digi4care/omp-profile-installer/main/scripts/install-release.sh | sh
 ```
 
 > **Release availability.** The bootstrap requires a signed GitHub Release with
 > assets, and **no release has been published yet** — check the
-> [releases page](https://github.com/digi4care/omp-topologies/releases) before
+> [releases page](https://github.com/digi4care/omp-profile-installer/releases) before
 > running it. Until a signed release exists, run the CLI from a checkout
 > instead (`cargo run -- <args>`), as shown below.
 
@@ -259,18 +265,18 @@ Once the CLI is available, discover and install a topology into an OMP profile:
 ```sh
 # List installable topologies in a source (an installed binary has no
 # checkout, so pass the source explicitly)
-omp-topology list --source github:digi4care/omp-topologies
+omp-profile list --source github:digi4care/omp-profile-installer
 
 # Preview the plan; change nothing
-omp-topology install -t digital-product-studio \
-  --source github:digi4care/omp-topologies \
+omp-profile install -t digital-product-studio \
+  --source github:digi4care/omp-profile-installer \
   --profile digital-product-studio --dry-run
 
 # Apply it, optionally also creating a `studio` shell command that runs
 # OMP with this profile (via `omp --profile digital-product-studio
 # --alias studio`), then start OMP with that profile
-omp-topology install -t digital-product-studio \
-  --source github:digi4care/omp-topologies \
+omp-profile install -t digital-product-studio \
+  --source github:digi4care/omp-profile-installer \
   --profile digital-product-studio --alias studio
 omp --profile digital-product-studio
 ```
@@ -280,23 +286,23 @@ omp --profile digital-product-studio
 `doctor` checks local OMP and installer state without repairing it, contacting
 topology sources, or evaluating shell startup files. It does not infer whether
 a shell alias is configured. `doctor --json` emits one JSON document; errors
-return exit code 1. See the [installer guide](docs/installer.md) for scope and
+return exit code 1. See the [installer guide](docs/installer-guide.md) for scope and
 safe handling of unregistered data.
 
-Generate completions for Bash, Fish, or Zsh with `omp-topology completions
+Generate completions for Bash, Fish, or Zsh with `omp-profile completions
 <shell>` and install the output in that shell's completion directory. The CLI
 does not edit shell configuration. Regenerate the script after updating the
 CLI.
 
 ```sh
 mkdir -p ~/.local/share/bash-completion/completions
-omp-topology completions bash > ~/.local/share/bash-completion/completions/omp-topology
+omp-profile completions bash > ~/.local/share/bash-completion/completions/omp-profile
 
 mkdir -p ~/.config/fish/completions
-omp-topology completions fish > ~/.config/fish/completions/omp-topology.fish
+omp-profile completions fish > ~/.config/fish/completions/omp-profile.fish
 
 mkdir -p ~/.zfunc
-omp-topology completions zsh > ~/.zfunc/_omp-topology
+omp-profile completions zsh > ~/.zfunc/_omp-profile
 ```
 
 For Zsh, make `~/.zfunc` available to the completion loader by adding this
@@ -307,24 +313,32 @@ fpath=(~/.zfunc $fpath)
 autoload -Uz compinit
 compinit
 ```
-
-From a checkout of this repository, drop `--source` (the checkout root is the
-default source) and prefix commands with `cargo run --`:
+Every `list` and `install` command requires an explicit `--source`. To use
+profiles bundled in this repository, select `--source .` from the checkout or
+`--source github:digi4care/omp-profile-installer`. Prefix commands with
+`cargo run --` when using the CLI from a checkout. A source can be a standalone
+profile repository or a catalog:
 
 ```sh
-git clone https://github.com/digi4care/omp-topologies.git
-cd omp-topologies
-cargo run -- list
-cargo run -- install -t digital-product-studio --profile digital-product-studio --dry-run
+# List from the installer repository
+git clone https://github.com/digi4care/omp-profile-installer.git
+cd omp-profile-installer
+cargo run -- list --source github:digi4care/omp-profile-installer
+
+# A standalone profile package can be listed and installed directly by path:
+omp-profile list --source /path/to/omp-profile-digital-product-studio
+omp-profile install -t digital-product-studio \\
+  --source /path/to/omp-profile-digital-product-studio \\
+  --profile digital-product-studio
 ```
 
-More guidance: [docs/installer.md](docs/installer.md) (how the installer
+More guidance: [docs/installer-guide.md](docs/installer-guide.md) (how the installer
 works: install IDs, profiles, shell aliases, preflight checks, and
 troubleshooting),
-[docs/v0.3-migration.md](docs/v0.3-migration.md) (the v0.3.0 `--alias` →
+[docs/cli-migration-v0.3.md](docs/cli-migration-v0.3.md) (the v0.3.0 `--alias` →
 `--install-id` contract for users coming from v0.2),
-[topologies/README.md](topologies/README.md) (payload layout and
-discovery), [CONTRIBUTING.md](CONTRIBUTING.md) (adding a topology, verification).
+[CONTRIBUTING.md](CONTRIBUTING.md) (adding or changing a topology package,
+verification).
 
 ---
 
@@ -332,9 +346,9 @@ discovery), [CONTRIBUTING.md](CONTRIBUTING.md) (adding a topology, verification)
 
 The day-to-day lifecycle is `list → install → status → update → remove`:
 
-1. **Discover.** `omp-topology list --source github:digi4care/omp-topologies`
+1. **Discover.** `omp-profile list --source github:digi4care/omp-profile-installer`
    prints each installable topology's name, version, and description as declared
-   in its manifest. `omp-topology profiles list` shows the profiles found under
+   in its manifest. `omp-profile profiles list` shows the profiles found under
    `~/.omp` and the installs managed under each.
 2. **Preview.** `install --dry-run` prints the planned changes (`would write: ...`,
    including paths that go through a supported profile symlink) and exits 0
@@ -353,7 +367,7 @@ The day-to-day lifecycle is `list → install → status → update → remove`:
    Re-installing under the same install ID and target is an intentional
    upsert; an install ID pointing elsewhere is refused with an actionable
    error. See
-   [docs/installer.md](docs/installer.md#alias-name-preflight).
+   [docs/installer-guide.md](docs/installer-guide.md#alias-name-preflight).
    A second install ID may target the same agent directory: each install
    owns only what it installed, and any overlap with another install's
    files or config keys is refused before anything is mutated.
@@ -396,7 +410,7 @@ other and of the CLI's own release version.
   compatible changes (a new agent or skill, a new optional config key); `patch`
   for fixes and clarifications that do not change the contract (policy
   corrections, ownership fixes, wording).
-- **CLI releases are separate.** `omp-topology self-update --version` (and the
+- **CLI releases are separate.** `omp-profile self-update --version` (and the
   bootstrap's `--version`) pin the *CLI* release; topology versions live in
   `topology.yml` and never move the CLI.
 
@@ -424,18 +438,18 @@ exists — `update` does not create installs):
 #    --version 2.0.1 assertion is itself the version proof: the command
 #    fails here unless the selected source's topology.yml declares exactly
 #    2.0.1.
-omp-topology update --install-id digital-product-studio \
+omp-profile update --install-id digital-product-studio \
   --ref main --version 2.0.1 --dry-run
 
 # 2. Apply for real once the plan looks right. The same --version assertion
 #    is re-checked before anything is mutated.
-omp-topology update --install-id digital-product-studio \
+omp-profile update --install-id digital-product-studio \
   --ref main --version 2.0.1
 
 # 3. Confirm what the registry records: source, commit/digest, and
 #    freshness. status compares commit/digest freshness only and does not
 #    print a topology version.
-omp-topology status --install-id digital-product-studio
+omp-profile status --install-id digital-product-studio
 ```
 
 Omit `--ref` to update against the source recorded at install time; omit
@@ -456,7 +470,7 @@ updated in place.
 sh scripts/install-release.sh
 
 # Or pipe it directly:
-curl -fsSL https://raw.githubusercontent.com/digi4care/omp-topologies/main/scripts/install-release.sh | sh
+curl -fsSL https://raw.githubusercontent.com/digi4care/omp-profile-installer/main/scripts/install-release.sh | sh
 
 # Pinned release and/or custom location
 sh scripts/install-release.sh --version v0.2.0 --bin-dir ~/.local/bin
@@ -472,20 +486,20 @@ previous installation untouched. See [RELEASING.md](RELEASING.md) for the
 full trust model and manual verification commands.
 
 > Until a signed release is actually published, the bootstrap fails closed and
-> installs nothing — check the [releases page](https://github.com/digi4care/omp-topologies/releases)
+> installs nothing — check the [releases page](https://github.com/digi4care/omp-profile-installer/releases)
 > first, and run from a checkout (`cargo run -- ...`) in the meantime.
 
 **Self-update** (from an installed CLI; same signature verification):
 
 ```sh
-omp-topology self-update            # latest release
-omp-topology self-update --version 0.2.0 --dry-run   # plan a pinned update
+omp-profile self-update            # latest release
+omp-profile self-update --version 0.2.0 --dry-run   # plan a pinned update
 ```
 
 **From source** (any checkout; requires a Rust toolchain):
 
 ```sh
-cargo build --release   # binary at target/release/omp-topology
+cargo build --release   # binary at target/release/omp-profile
 cargo test --locked     # full local test run
 ```
 
@@ -534,42 +548,39 @@ local Docker runs only; GitHub-hosted CI caches separately and is unchanged.
 │   ├── self_update.rs       # signature-verified in-place self-update
 │   ├── config_mode.rs       # candidate / merge / replace config handling
 │   └── anchored/            # descriptor-anchored FS (the only unsafe boundary)
-├── topologies/
-│   ├── README.md            # payload layout and discovery contract
-│   └── digital-product-studio/   # the installable topology (agent/ + topology.yml)
-├── scripts/
-│   ├── install-release.sh   # fail-closed signed-release bootstrap
-│   └── rust-gates.sh        # pinned fmt/clippy/test gate entry point
-├── tests/
-│   ├── installer.rs         # installer contract suite
-│   ├── cli.rs               # CLI surface tests
-│   └── regressions.rs       # regression tests
-├── keys/omp-topology-release-public.pem   # public half of the release signing key
-├── .github/workflows/       # release.yml (signed release), rust-gates.yml (Rust PR gates),
-│                            # topology.yml (changed-topology PR gates)
-└── docs/                    # contributor templates and project-wide notes
+├── docs/                    # contributor templates and project-wide notes
+└── .github/workflows/       # release automation and Rust PR gates
 ```
 
-A topology payload is `topologies/<name>/` with a `topology.yml` manifest
+The profile packages are maintained in separate Git repositories; each package
+is rooted at its repository and contains `topology.yml` and `agent/`. This
+installer repository bundles no topology catalog. The installer also supports
+legacy catalog packages at `topologies/<slug>/topology.yml` when that layout
+is present in an explicitly selected external source. Select a package by its
+declared manifest name with `-t <slug>`, and identify its source with
+`--source`. The installer repository (formerly `digi4care/omp-topologies`) remains supported
+as a source; no marketplace integration is implied.
+
+A topology payload is a package root containing a `topology.yml` manifest
 (`name`, `version`, `description`, `installable: true`, optional `profile`)
-plus an `agent/` overlay; the selected config mode handles `agent/config.yml`
+plus an `agent/` overlay; legacy packages may instead live at
+`topologies/<name>/`. The selected config mode handles `agent/config.yml`
 separately. Candidate may publish raw bytes as `config.yml.new`; replacement
 installs raw bytes as the active config; merge performs structural merging.
-`agent/skills/*` can be routed to a
-separate root with `--skills-dir`. The installer rejects symlinks and unsafe
-relative paths inside the overlay. The source tree itself is the catalog:
-there is no hand-maintained index file.
-
+`agent/skills/*` can be routed to a separate root with `--skills-dir`. The
+installer rejects symlinks and unsafe relative paths inside the overlay.
+Legacy source trees need no hand-maintained index file.
 ---
 
 ## 🔧 Configuration Matrix
+
 
 The CLI's configuration surface is its flags plus a few environment variables.
 Defaults below are what the code actually applies when the option is absent.
 
 | Variable / flag | Applies to | What it does | Default |
 |---|---|---|---|
-| `--source` | `list`, `install`, `update` | Topology source: `github:OWNER/REPO`, an HTTPS GitHub URL, or a local path containing `topologies/` | current checkout root (installed binaries must pass it) |
+| `--source` | `list`, `install`, `update` | Topology source: `github:OWNER/REPO`, an HTTPS GitHub URL, or a local path containing a root-level `topology.yml` package or legacy `topologies/` catalog | required for `list` and `install`; `update` uses the recorded source unless overridden |
 | `--ref` | `list`, `install`, `update` | Selects which Git ref of the source is read — a branch, tag, or full 40-hex SHA; it picks the checkout only and never resolves a topology version. For list/install it requires a GitHub `--source`. For update, optionally overrides the recorded GitHub source's ref without a new `--source`; invalid with a local source. | the remote's default `HEAD` |
 | `--profile` | `install`, `remove`, `status` | Target profile, resolved via `omp --profile NAME config path` (mutually exclusive with `--agent-dir`) | ambient profile from `omp config path` |
 | `--agent-dir` | `install`, `remove`, `status` | Explicit target agent directory | — |
@@ -585,7 +596,7 @@ Defaults below are what the code actually applies when the option is absent.
 | `XDG_STATE_HOME` | state location | Root for the registry, manifests, snapshots, and source cache | `~/.local/state/omp-topology` |
 | `OMP_TOPOLOGY_BIN_DIR` / `--bin-dir` | `install-release.sh` | Install directory for the CLI binary | `~/.local/bin` |
 | `OMP_TOPOLOGY_VERSION` / `--version` | `install-release.sh` | Release tag to install | `latest` |
-| `OMP_TOPOLOGY_REPO` | `install-release.sh` | `owner/repo` override for the release source | `digi4care/omp-topologies` |
+| `OMP_TOPOLOGY_REPO` | `install-release.sh` | `owner/repo` override for the release source | `digi4care/omp-profile-installer` |
 
 ---
 
@@ -639,7 +650,7 @@ Defaults below are what the code actually applies when the option is absent.
 
 - **No signed release published yet** — the bootstrap and `self-update` require
   a signed GitHub Release with assets. Check the
-  [releases page](https://github.com/digi4care/omp-topologies/releases) first;
+  [releases page](https://github.com/digi4care/omp-profile-installer/releases) first;
   until one exists, run the CLI from a checkout (`cargo run -- ...`) and use
   `scripts/install-release.sh` only once a release is available.
 - **Platform coverage** — Linux x86_64 only, as a static musl build (no Linux
@@ -657,8 +668,9 @@ Defaults below are what the code actually applies when the option is absent.
 - **Freshness can be `unknown`** — when a source cannot be resolved (network
   failure, moved or deleted local checkout, removed topology), `status` says so
   instead of guessing.
-- **Installed binaries carry no checkout** — outside this repository, pass
-  `--source github:digi4care/omp-topologies` explicitly (or run from a checkout).
+- **Explicit source selection** — the installer repository bundles no
+  topology catalog. `list` and `install` require `--source`; installed binaries
+  do not infer a source. `update` uses its recorded source unless overridden.
 
 ---
 

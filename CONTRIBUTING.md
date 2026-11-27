@@ -6,97 +6,13 @@ Contributions should be focused, evidence-backed, and easy to review. Keep chang
 
 - Read the relevant topology, its `topology.yml`, agent rules, and charter skills. Reuse established conventions.
 - For behavior or policy changes, identify the user-visible problem and the acceptance criteria the change must satisfy. Ask the maintainer when scope or a material decision is unclear; do not resolve it by assumption.
-- Keep topology-specific changes under `topologies/<name>/`. Update the corresponding `docs/` material when the topology's requirements, behavior, or verification status changes.
+- Keep topology-specific changes in the relevant standalone profile repository or external legacy package. For profile package creation, use the single authoring kit at [`omp-profile-example/README.md`](omp-profile-example/README.md).
 - Do not edit generated or unrelated files. Preserve existing user changes and report any unrelated workspace state you encounter.
 
-## Adding a topology
+## Adding or changing a topology package
 
-A topology is discoverable by the installer only when
-`topologies/<directory>/topology.yml` exists, parses, and sets
-`installable: true`. Follow this checklist so a new topology is
-installer-compatible and understandable to humans and agents:
+Use [`omp-profile-example/README.md`](omp-profile-example/README.md) as the single entry point for the package specification, copyable example, README template, and validation instructions. Keep profile-specific design documents in the owning profile repository's `docs/` directory.
 
-1. **Justify it.** State in the PR how the topology differs from every
-   existing one — its routing model, roles, or approval boundaries. Do not
-   duplicate an existing topology with cosmetic changes; extend the existing
-   one instead when the difference is a variant of the same workflow.
-2. **Name it.** Use a lowercase kebab-case slug for the directory, and set
-   `topology.yml` `name` to the same slug. The manifest `name` is what users
-   pass to `-t` and must match the selected topology name.
-3. **Write the manifest.** Populate `version` and `description` (the
-   installer renders them; fallbacks exist but produce poor listings), set
-   `installable: true`, and set `profile` only if the topology needs a
-   non-default profile suggestion. Start `version` at `1.0.0` and create the
-   topology's own `topologies/<name>/CHANGELOG.md` (see "Versioning topology
-   changes" below).
-4. **Structure the payload.**
-   - `topologies/<name>/agent/` is the only directory the installer copies.
-     Nested files are copied recursively; `agent/config.yml` is not copied
-     verbatim — it is handled by the installer's config mode. In the
-     default candidate mode the existing active config is preserved
-     byte-for-byte and the topology's version is published beside it as
-     `config.yml.new` (it becomes the active `config.yml` only when no
-     config exists). A structural merge into the profile config requires
-     an explicit `--config-merge`; a full replacement requires an
-     explicit `--config-replace`, which can overwrite unrelated profile
-     settings (it backs up first).
-   - The installer rejects symlinks and unsafe relative paths anywhere under
-     `agent/` — use plain files and directories only.
-   - Keep human documentation out of `agent/`: put the README at
-     `topologies/<name>/README.md` and longer-lived design or decision
-     records under `topologies/<name>/docs/`.
-5. **Write the README** from [`docs/topology-readme-template.md`](docs/topology-readme-template.md).
-   Every claim must be grounded in the topology's own source files; keep it
-   concise — it is an orientation aid, not promotional material.
-6. **Verify before opening the PR.**
-   - Run the installer contract suite: `cargo test --locked --test installer`.
-   - Dry-run the install from a source checkout and inspect the planned file
-     set:
-
-     ```sh
-     # Default config mode: an existing config is preserved and the
-     # topology's config is published as config.yml.new (created as the
-     # active config.yml only when none exists). Add --config-merge or
-     # --config-replace here if the dry-run should exercise those modes.
-     # The /agent basename matters: the default install ID is the
-     # lowercased basename of the agent directory and must match
-     # [a-z0-9][a-z0-9-]{0,63}, which a bare mktemp basename (dots,
-     # uppercase letters) violates.
-     cargo run -- install -t <name> --dry-run --agent-dir "$(mktemp -d)/agent"
-     ```
-
-   - Confirm `cargo run -- list` shows the topology with the expected
-     name, version, and description.
-
-## Versioning topology changes
-
-Every topology is independently versioned, and the version is load-bearing:
-`update` and the CLI's exact `--version` assertion compare against the
-`version` declared in the selected source's `topology.yml`. (`status` never
-compares versions; it reports source commit/digest freshness.)
-
-- **Every change bumps the version.** Any PR that changes a topology's
-  payload or metadata — `agent/` files, `topology.yml` fields, shipped docs —
-  must bump that topology's `version` in the same PR. There is no "too small
-  to bump" topology change.
-- **Bump semantics** (full contract in the repository README's "Topology
-  Versioning and Updates" section): `major` for changes to the topology's
-  contract with its users (routing model, role boundaries, approval gates,
-  removed or renamed agents/skills/config keys); `minor` for additive,
-  backward-compatible changes; `patch` for fixes and clarifications that
-  leave the contract intact.
-- **One changelog per topology.** Each topology keeps its own
-  `topologies/<name>/CHANGELOG.md` in Keep-a-Changelog style, with one dated
-  section per version describing what actually changed. Do not invent
-  features or credit fixes the diff does not contain.
-- **Topology versions are not CLI releases.** The `omp-topology` crate
-  version and its signed releases move independently of every topology
-  version; never couple a topology bump to a CLI release.
-- **Verify the update path when it changes.** If a PR changes versioning,
-  update, or source-selection behavior, verify `update` against an install
-  ID that already exists in a real registry — `update --install-id <existing>`
-  does not create installs. Run `--dry-run` first, inspect the plan, then
-  run the real update, and report both under the PR's Verification section.
 
 ## Implementation and verification
 
@@ -116,27 +32,19 @@ compares versions; it reports source commit/digest freshness.)
   `docker compose exec rust ./scripts/rust-gates.sh`. `docker compose down`
   preserves the caches; `docker compose down -v` deletes them.
 
-- Continuous integration runs one workflow per input domain on every pull
-  request, each gated to the files it verifies:
-
-  - `.github/workflows/rust-gates.yml` (check `fmt, clippy, tests`) runs
-    `scripts/rust-gates.sh` only when the PR changes Rust inputs (Rust
-    sources, Cargo manifests or lockfile, the toolchain file, `.cargo/`,
-    or the gate script/workflow itself). On a topology-only PR the job
-    succeeds without running the Rust gates.
-  - `.github/workflows/topology.yml` (check `topology`) verifies
-    `topologies/<slug>/` changes only: it fails on topology payload files
-    without a valid manifest, confirms `cargo run --locked -- list --json`
-    shows each changed topology's exact name/version/description from its
-    `topology.yml`, runs `cargo test --locked --test installer` once, and
-    dry-runs each changed topology into a fresh temporary agent directory.
-    On a PR with no topology change the job succeeds explicitly without
-    running topology checks.
+- CI validates changes in the repository that owns the package. Standalone
+  profile-repository payload changes run that repository's validation workflow;
+  keep its manifest, `agent/` payload, and validation inputs in scope.
+- This installer repository's `.github/workflows/rust-gates.yml` runs
+  `scripts/rust-gates.sh` only when a PR changes Rust inputs (Rust sources,
+  Cargo manifests or lockfile, the toolchain file, `.cargo/`, or the gate
+  script/workflow itself). It does not validate external topology payloads.
+  There is no bundled catalog workflow; validate legacy catalog changes using
+  the applicable checks for the external source repository.
 
   CI never replaces local verification: run the applicable checks locally
-  before opening the PR and report them in the PR description. Both checks
-  must pass before merging; a job that skipped its domain gates is not
-  evidence for that domain.
+  before opening the PR and report them in the PR description. A job that
+  skipped its domain gates is not evidence for that domain.
 
 - For topology or prompt changes, inspect the resulting files and compare them with the source topology or approved requirements as applicable. Do not claim tests, installation, or runtime behavior were verified unless those checks were actually run.
 - In reports and documentation, distinguish verified results from implementation-reported claims, assumptions, pending work, and unverified criteria. A passing narrow check proves only the behavior it exercised.
@@ -144,7 +52,7 @@ compares versions; it reports source commit/digest freshness.)
 
 ## Pull requests
 
-Use one logical change per PR. Keep the title specific and use the repository's conventional style, for example `fix(installer): preserve config comments` or `docs(teddy): clarify verification status`.
+Use one logical change per PR. Keep the title specific and use the repository's conventional style, for example `fix(installer): preserve config comments` or `docs(example): clarify verification status`.
 
 Write the PR description for a reviewer who has not followed the discussion. Include:
 
@@ -154,12 +62,7 @@ Write the PR description for a reviewer who has not followed the discussion. Inc
 4. **Limitations / follow-up** — known gaps, unverified criteria, dependencies on another PR, or pending decisions.
 
 Keep the description aligned with the actual PR diff. For stacked PRs, link the prerequisite and state the merge order. Do not include unrelated branch history as if it were part of the change.
-
-For PRs that change a topology's payload or metadata, the description must also confirm each of the following:
-
-- **Version bumped.** `topologies/<name>/topology.yml` `version` was bumped per SemVer (`major`/`minor`/`patch`) for every topology whose files changed.
-- **Changelog entry added.** `topologies/<name>/CHANGELOG.md` has a dated section for the new version describing the actual change — no invented features.
-- **Update verified.** If the PR touches versioning, update, or source-selection behavior, `update --install-id <existing-install-id>` was run against a real existing install — `--dry-run` first, then the real update — with the observed results reported under Verification.
+For package versioning, changelog, and validation requirements, follow the profile authoring kit linked above.
 
 ## Review and merging
 
