@@ -30,7 +30,9 @@
 // site; no other module may use `unsafe`.
 #[allow(unsafe_code)]
 mod anchored;
+mod completions;
 mod config_mode;
+mod doctor;
 mod error;
 mod fsx;
 mod install;
@@ -48,6 +50,7 @@ mod value;
 mod yamlwork;
 
 use std::collections::BTreeSet;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use clap::{Args, Parser, Subcommand};
@@ -85,6 +88,12 @@ enum Command {
     Update(UpdateArgs),
     /// Update this CLI from a signed GitHub Release
     SelfUpdate(SelfUpdateArgs),
+    /// Diagnose local OMP profiles and topology installer state
+    Doctor(DoctorArgs),
+    /// Generate shell completion scripts
+    Completions(CompletionsArgs),
+    #[command(name = "__complete", hide = true)]
+    Complete(InternalCompletionArgs),
 }
 
 #[derive(Args)]
@@ -274,6 +283,44 @@ struct SelfUpdateArgs {
     json: bool,
 }
 
+#[derive(Args)]
+struct DoctorArgs {
+    /// Diagnose one registered install ID (mutually exclusive with profile and agent directory)
+    #[arg(
+        long = "install-id",
+        conflicts_with_all = ["profile", "agent_dir"],
+        add = clap_complete::engine::ArgValueCompleter::new(completions::complete_install_ids)
+    )]
+    install_id: Option<String>,
+    /// Diagnose one OMP profile (mutually exclusive with install ID and agent directory)
+    #[arg(
+        long,
+        conflicts_with_all = ["install_id", "agent_dir"],
+        add = clap_complete::engine::ArgValueCompleter::new(completions::complete_profiles)
+    )]
+    profile: Option<String>,
+    /// Diagnose one explicit agent directory
+    #[arg(long, conflicts_with_all = ["install_id", "profile"], value_hint = clap::ValueHint::DirPath)]
+    agent_dir: Option<String>,
+    /// Emit exactly one JSON document on stdout
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct CompletionsArgs {
+    /// Shell to generate for
+    #[arg(value_parser = ["bash", "fish", "zsh"])]
+    shell: String,
+}
+
+#[derive(Args)]
+struct InternalCompletionArgs {
+    /// Current command line words, after `--`
+    #[arg(last = true, num_args = 0.., allow_hyphen_values = true)]
+    words: Vec<OsString>,
+}
+
 fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
@@ -284,6 +331,9 @@ fn main() -> std::process::ExitCode {
         Command::Status(args) => cmd_status(&args),
         Command::Update(args) => cmd_update(&args),
         Command::SelfUpdate(args) => cmd_self_update(&args),
+        Command::Doctor(args) => cmd_doctor(&args),
+        Command::Completions(args) => cmd_completions(&args),
+        Command::Complete(args) => cmd_complete(args),
     };
     match result {
         Ok(code) => std::process::ExitCode::from(code as u8),
@@ -292,6 +342,29 @@ fn main() -> std::process::ExitCode {
             std::process::ExitCode::from(1)
         }
     }
+}
+
+fn cmd_doctor(args: &DoctorArgs) -> Result<i32, CliError> {
+    let anchor = state_anchor()?;
+    doctor::run(
+        args.install_id.as_deref(),
+        args.profile.as_deref(),
+        args.agent_dir.as_deref(),
+        args.json,
+        &anchor,
+    )
+}
+
+fn cmd_completions(args: &CompletionsArgs) -> Result<i32, CliError> {
+    let script = completions::script(&args.shell)
+        .ok_or_else(|| CliError::Usage(format!("unsupported shell '{}'", args.shell)))?;
+    print!("{script}");
+    Ok(0)
+}
+
+fn cmd_complete(args: InternalCompletionArgs) -> Result<i32, CliError> {
+    completions::complete(args.words);
+    Ok(0)
 }
 
 /// Build the per-command config mode from the CLI flag combination.
@@ -325,7 +398,7 @@ fn config_mode_from_flags(
 /// The stable state anchor for registry and manifest paths: the checkout
 /// root when one is available, otherwise the executable's parent directory
 /// (an installed binary has no checkout).
-fn state_anchor() -> Result<PathBuf, CliError> {
+pub(crate) fn state_anchor() -> Result<PathBuf, CliError> {
     if let Ok(root) = topology::repo_root() {
         return Ok(root);
     }

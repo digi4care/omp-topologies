@@ -275,6 +275,39 @@ omp-topology install -t digital-product-studio \
 omp --profile digital-product-studio
 ```
 
+### Diagnose a host and enable shell completion
+
+`doctor` checks local OMP and installer state without repairing it, contacting
+topology sources, or evaluating shell startup files. It does not infer whether
+a shell alias is configured. `doctor --json` emits one JSON document; errors
+return exit code 1. See the [installer guide](docs/installer.md) for scope and
+safe handling of unregistered data.
+
+Generate completions for Bash, Fish, or Zsh with `omp-topology completions
+<shell>` and install the output in that shell's completion directory. The CLI
+does not edit shell configuration. Regenerate the script after updating the
+CLI.
+
+```sh
+mkdir -p ~/.local/share/bash-completion/completions
+omp-topology completions bash > ~/.local/share/bash-completion/completions/omp-topology
+
+mkdir -p ~/.config/fish/completions
+omp-topology completions fish > ~/.config/fish/completions/omp-topology.fish
+
+mkdir -p ~/.zfunc
+omp-topology completions zsh > ~/.zfunc/_omp-topology
+```
+
+For Zsh, make `~/.zfunc` available to the completion loader by adding this
+to `~/.zshrc`, then restart the shell:
+
+```sh
+fpath=(~/.zfunc $fpath)
+autoload -Uz compinit
+compinit
+```
+
 From a checkout of this repository, drop `--source` (the checkout root is the
 default source) and prefix commands with `cargo run --`:
 

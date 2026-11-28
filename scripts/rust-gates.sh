@@ -11,6 +11,7 @@
 # Toolchain: rust:1.100.0 (matches rust-toolchain.toml). rustfmt and clippy
 # are installed by the outer Docker path and preinstalled in the Compose image;
 # no host Rust toolchain is needed.
+# Fish and Zsh are installed for the actual shell-completion integration probes.
 #
 # Gates (any failure fails the script):
 #   cargo fmt --all -- --check
@@ -31,6 +32,9 @@ if [ "${OMP_TOPOLOGY_RUST_CONTAINER:-0}" != "1" ]; then
         --env OMP_TOPOLOGY_RUST_CONTAINER=1 \
         "$IMAGE" sh -c '
             set -eu
+            apt-get update
+            apt-get install -y --no-install-recommends fish zsh
+            rm -rf /var/lib/apt/lists/*
             rustup component add rustfmt clippy
             exec ./scripts/rust-gates.sh
         '

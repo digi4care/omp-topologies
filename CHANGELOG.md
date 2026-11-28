@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here.
 
+## [Unreleased]
+
+### Added
+
+- Add read-only local host diagnostics with `doctor` and Bash, Fish, and Zsh
+  completions that honor the CLI's valid option combinations.
+
 ## [0.3.0] - 2026-11-26
 
 ### Changed

@@ -196,6 +196,34 @@ These checks run before any mutation, so a refused install leaves the target
 untouched. To resolve one, remove the owning install first
 (`remove --install-id <name>`) or adjust the topology.
 
+## Host diagnostics and shell completion
+
+`omp-topology doctor` checks the local CLI/OMP environment, registered
+installs, ownership manifests, and managed state. With no selector it checks
+all registered installs; pass exactly one of `--install-id`, `--profile`, or
+`--agent-dir` to narrow the target. It is read-only: it does not run shell
+startup files, contact remote topology sources, or repair state. `--json`
+prints one JSON document. Exit code 1 means diagnostic errors were found;
+warnings alone do not cause failure.
+
+The command does not infer expected shell aliases; alias names are not part of
+the install registry. A detected installation without registry ownership is
+reported as unregistered data, not adopted or removed. If `omp-topology` itself
+cannot run, use the manual CLI and OMP checks in this guide.
+
+Generate shell completion scripts with `omp-topology completions bash`,
+`omp-topology completions fish`, or `omp-topology completions zsh`. The
+command writes to stdout and never edits shell startup files. Install each
+script in the appropriate completion directory; after a CLI upgrade, generate
+and install it again so the script matches the new command set.
+
+For Zsh, the generated `_omp-topology` file must live in a directory on
+`fpath`. For the README example's `~/.zfunc` directory, add
+`fpath=(~/.zfunc $fpath)`, `autoload -Uz compinit`, and `compinit` to
+`~/.zshrc`, then restart the shell. Bash loading depends on the installed
+`bash-completion` setup; Fish loads scripts from its completions directory.
+
+
 ## Troubleshooting: `unknown install id`
 
 `update`, `remove`, and `status` operate on install IDs already in the

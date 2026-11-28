@@ -6,6 +6,11 @@
 # image's own cargo/rustup installation under /usr/local stays intact.
 FROM rust:1.100.0
 
+# The CLI integration tests execute generated completions in all supported
+# shells, not just inspect their output.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends fish zsh \
+    && rm -rf /var/lib/apt/lists/*
 RUN rustup component add rustfmt clippy
 
 WORKDIR /workspace
