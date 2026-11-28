@@ -18,10 +18,75 @@ pub(crate) fn script(shell: &str) -> Option<&'static str> {
         "bash" => Some(
             r#"_omp_topology_complete() {
     local candidate
-    local -a words=("${COMP_WORDS[@]:1:COMP_CWORD}")
-    if (( COMP_CWORD >= ${#COMP_WORDS[@]} )); then
+    # COMP_WORDBREAKS splits values such as https://github.com/acme/repo
+    # into fragments (https : / / github.com / acme / repo) that the
+    # completion engine cannot recognize as one --source value. Rebuild
+    # the words from COMP_LINE up to the cursor instead: only unquoted
+    # whitespace and "=" separate words, quotes group and are removed,
+    # a backslash quotes the next character (backslash-newline is a line
+    # continuation), and every other character - including the
+    # COMP_WORDBREAKS punctuation - stays inside its word.
+    local line=${COMP_LINE:0:COMP_POINT}
+    local -a words=()
+    local i char quote='' token='' started=0
+    for ((i = 0; i < ${#line}; i++)); do
+        char=${line:i:1}
+        if [[ -n $quote ]]; then
+            if [[ $char == "$quote" ]]; then
+                quote=''
+            elif [[ $quote == '"' && $char == '\' ]]; then
+                i=$((i + 1))
+                if (( i < ${#line} )); then
+                    char=${line:i:1}
+                    case $char in
+                        '"'|'\'|'$'|'`') token+=$char ;;
+                        $'\n') ;;
+                        *) token+="\\$char" ;;
+                    esac
+                else
+                    token+='\'
+                fi
+            else
+                token+=$char
+            fi
+        elif [[ $char == "'" || $char == '"' ]]; then
+            quote=$char
+            started=1
+        elif [[ $char == '\' ]]; then
+            i=$((i + 1))
+            if (( i < ${#line} )); then
+                char=${line:i:1}
+                if [[ $char != $'\n' ]]; then
+                    token+=$char
+                fi
+            else
+                token+='\'
+            fi
+            started=1
+        elif [[ $char == ' ' || $char == $'\t' || $char == $'\n' ]]; then
+            if (( started )); then
+                words+=("$token")
+                token=''
+                started=0
+            fi
+        elif [[ $char == '=' ]]; then
+            if (( started )); then
+                words+=("$token")
+                token=''
+                started=0
+            fi
+            words+=("=")
+        else
+            token+=$char
+            started=1
+        fi
+    done
+    if (( started )); then
+        words+=("$token")
+    else
         words+=("")
     fi
+    words=("${words[@]:1}")
     local -a normalized_words=()
     local i last_index
     for ((i = 0; i < ${#words[@]}; i++)); do
@@ -98,17 +163,21 @@ complete -o nosort -o filenames -F _omp_topology_complete omp-topology
         # token containing an embedded newline. Tokenize the raw process
         # text instead: `commandline -pc` reports it as one string (string
         # collect keeps it a single element), and the loop below applies
-        # fish's quoting rules - whitespace ends a token, single quotes are
-        # literal, double quotes and backslashes escape the next character,
-        # and `#` at the start of a token comments out the rest - so every
-        # completed token keeps its exact framing. Variables, command
-        # substitutions, and wildcards stay unexpanded; option filtering
-        # only needs the literal tokens. A trailing unterminated token is
-        # the one being completed and is appended below via commandline -ot.
+        # fish's quoting rules - whitespace ends a token unless it sits
+        # inside a command substitution, single quotes are literal, double
+        # quotes and backslashes escape the next character, a
+        # backslash-newline continuation removes both characters (inside
+        # double quotes too), and `#` at the start of a token comments out
+        # the rest - so every completed token keeps its exact framing.
+        # Variables, command substitutions, and wildcards stay unexpanded;
+        # option filtering only needs the literal tokens. A trailing
+        # unterminated token is the one being completed and is appended
+        # below via commandline -ot.
         set -l raw (commandline -pc | string collect)
         set -l index 1
         set -l raw_length (string length -- "$raw")
         set -l quote ''
+        set -l depth 0
         set -l token ''
         set -l started 0
         while test $index -le $raw_length
@@ -135,7 +204,10 @@ complete -o nosort -o filenames -F _omp_topology_complete omp-topology
                                 set token "$token\\$next"
                             end
                         else
-                            if test "$next" = '"' -o "$next" = '\\' -o "$next" = '$'
+                            if test "$next" = \n
+                                # A backslash-newline continuation is
+                                # removed inside double quotes as well.
+                            else if test "$next" = '"' -o "$next" = '\\' -o "$next" = '$'
                                 set token "$token$next"
                             else
                                 set token "$token\\$next"
@@ -157,13 +229,33 @@ complete -o nosort -o filenames -F _omp_topology_complete omp-topology
                     if test (count $next) -gt 1
                         set next \n
                     end
-                    set token "$token$next"
+                    if test "$next" = \n
+                        # A backslash-newline continuation removes both
+                        # characters, joining the text into one token.
+                    else
+                        set token "$token$next"
+                        set started 1
+                    end
                 else
                     set token "$token\\"
+                    set started 1
                 end
+            else if test "$char" = '('
+                set depth (math $depth + 1)
+                set token "$token$char"
+                set started 1
+            else if test "$char" = ')'
+                if test $depth -gt 0
+                    set depth (math $depth - 1)
+                end
+                set token "$token$char"
                 set started 1
             else if test "$char" = ' ' -o "$char" = \t -o "$char" = \n
-                if test $started -eq 1
+                if test $depth -gt 0
+                    # Whitespace inside a command substitution stays in the
+                    # token: the substitution is one word to the shell.
+                    set token "$token$char"
+                else if test $started -eq 1
                     set words $words "$token"
                     set token ''
                     set started 0

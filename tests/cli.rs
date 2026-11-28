@@ -2094,6 +2094,117 @@ printf 'COMPREPLY:%s\n' "${COMPREPLY[@]}"
 }
 
 #[test]
+fn bash_completion_handles_github_url_wordbreaks() {
+    let temp = TestDir::new();
+    doctor_fixture(&temp);
+
+    let registry_path = temp.0.join("state/omp-topology/registry.json");
+    let mut registry: serde_json::Value =
+        serde_json::from_slice(&fs::read(&registry_path).expect("fixture registry is missing"))
+            .expect("fixture registry is invalid JSON");
+    registry["aliases"]["doctor-profile"]["source"] = serde_json::json!({
+        "kind": "github",
+        "owner": "acme",
+        "repo": "repo"
+    });
+    fs::write(
+        &registry_path,
+        serde_json::to_vec_pretty(&registry).expect("failed to encode GitHub fixture registry"),
+    )
+    .expect("failed to seed registered GitHub source");
+
+    let script = temp.0.join("bash.completion");
+    completion_script(&temp, "bash", &script);
+    let mut command = shell_command(&temp, "bash", &script, "");
+    command.args([
+        "--noprofile",
+        "--norc",
+        "-c",
+        r#"
+source "$OMP_COMPLETION_SCRIPT" || exit 81
+COMP_WORDBREAKS=$' \t\n"\'@><=;|&(:/'
+[[ "$COMP_WORDBREAKS" == *:* && "$COMP_WORDBREAKS" == */* ]] || exit 84
+registration=$(complete -p omp-topology 2>/dev/null) || exit 82
+read -r -a registration_words <<< "$registration"
+completion_function=""
+for ((i = 0; i < ${#registration_words[@]}; i++)); do
+  if [[ "${registration_words[i]}" == "-F" ]]; then
+    completion_function="${registration_words[i + 1]}"
+    break
+  fi
+done
+[[ -n "$completion_function" ]] || exit 83
+
+COMP_LINE='omp-topology update --install-id doctor-profile '
+COMP_POINT=${#COMP_LINE}
+COMP_TYPE=9
+COMP_WORDS=(omp-topology update --install-id doctor-profile)
+COMP_CWORD=${#COMP_WORDS[@]}
+"$completion_function"
+printf 'CONTROL:%s\n' "${COMPREPLY[@]}"
+COMP_LINE='omp-topology update --install-id doctor-profile --source /tmp/local '
+COMP_POINT=${#COMP_LINE}
+COMP_WORDS=(omp-topology update --install-id doctor-profile --source /tmp/local)
+COMP_CWORD=${#COMP_WORDS[@]}
+"$completion_function"
+printf 'LOCAL:%s\n' "${COMPREPLY[@]}"
+
+
+COMP_LINE='omp-topology update --install-id doctor-profile --source=https://github.com/acme/repo '
+COMP_POINT=${#COMP_LINE}
+COMP_WORDS=()
+word=''
+for ((i = 0; i < ${#COMP_LINE}; i++)); do
+  char=${COMP_LINE:i:1}
+  if [[ "$char" == ' ' ]]; then
+    [[ -z "$word" ]] || COMP_WORDS+=("$word")
+    word=''
+  elif [[ "$COMP_WORDBREAKS" == *"$char"* ]]; then
+    [[ -z "$word" ]] || COMP_WORDS+=("$word")
+    COMP_WORDS+=("$char")
+    word=''
+  else
+    word+="$char"
+  fi
+done
+[[ -z "$word" ]] || COMP_WORDS+=("$word")
+COMP_CWORD=${#COMP_WORDS[@]}
+[[ "${COMP_WORDS[*]}" == 'omp-topology update --install-id doctor-profile --source = https : / / github.com / acme / repo' ]] || exit 85
+"$completion_function"
+printf 'URL:%s\n' "${COMPREPLY[@]}"
+printf '__OMP_ADAPTER_INVOKED__\n'
+"#,
+    ]);
+    let output = command
+        .output()
+        .expect("failed to run Bash URL-wordbreak completion probe");
+    assert!(
+        output.status.success(),
+        "Bash URL-wordbreak completion probe failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.lines().any(|line| line == "__OMP_ADAPTER_INVOKED__"),
+        "Bash generated adapter did not run; probe output:\n{stdout}"
+    );
+    assert!(
+        stdout.lines().any(|line| line == "CONTROL:--ref"),
+        "Bash control did not offer --ref for the registered GitHub source; probe output:\n{stdout}"
+    );
+    assert!(
+        !stdout.lines().any(|line| line == "LOCAL:--ref"),
+        "Bash offered --ref for the explicit local source; probe output:\n{stdout}"
+    );
+    assert!(
+        stdout.lines().any(|line| line == "URL:--ref"),
+        "Bash did not offer --ref for the colon/slash-broken GitHub URL source; probe output:\n{stdout}"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn fish_completion_preserves_newlines_in_profile_prefix_tokens() {
     let temp = TestDir::new();
     let source_root = temp.0.join("source");
@@ -2207,6 +2318,7 @@ bind \t __omp_inspect_completion || exit 82
     );
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn fish_completion_preserves_newline_in_completed_argument() {
     let temp = TestDir::new();
@@ -2310,6 +2422,70 @@ fn fish_noninteractive_completion_preserves_newline_in_completed_argument() {
     assert!(
         completion_has_candidate(&newline_candidates, "--config-replace"),
         "Fish did not offer --config-replace for the newline-bearing --source token; candidates:\n{newline_candidates}"
+    );
+}
+#[test]
+fn fish_noninteractive_completion_keeps_command_substitution_as_one_token() {
+    let temp = TestDir::new();
+    let script = temp.0.join("fish.completion");
+    completion_script(&temp, "fish", &script);
+
+    let control_line = "omp-topology install --topology cli-contract-fixture --source /tmp/source ";
+    let control = shell_completion_candidates(&temp, "fish", &script, control_line);
+    assert!(
+        completion_has_candidate(&control, "--config-replace"),
+        "Fish control did not offer --config-replace; candidates:\n{control}"
+    );
+    assert!(
+        !completion_has_candidate(&control, "--config-precedence"),
+        "Fish control offered --config-precedence without --config-merge; candidates:\n{control}"
+    );
+
+    let substitution_line = "omp-topology install --topology cli-contract-fixture --source (printf '%s' --config-merge ) ";
+    let substitution = shell_completion_candidates(&temp, "fish", &script, substitution_line);
+    assert!(
+        completion_has_candidate(&substitution, "--config-replace"),
+        "Fish treated --config-merge inside one command-substitution token as an option and suppressed --config-replace; candidates:\n{substitution}"
+    );
+    assert!(
+        !completion_has_candidate(&substitution, "--config-precedence"),
+        "Fish treated --config-merge inside one command-substitution token as an option; candidates:\n{substitution}"
+    );
+}
+
+#[test]
+fn fish_noninteractive_completion_removes_backslash_newline_continuation() {
+    let temp = TestDir::new();
+    doctor_fixture(&temp);
+    let registry_path = temp.0.join("state/omp-topology/registry.json");
+    let mut registry: serde_json::Value =
+        serde_json::from_slice(&fs::read(&registry_path).expect("fixture registry is missing"))
+            .expect("fixture registry is invalid JSON");
+    registry["aliases"]["doctor-profile"]["source"] = serde_json::json!({
+        "kind": "github",
+        "owner": "acme",
+        "repo": "repo"
+    });
+    fs::write(
+        &registry_path,
+        serde_json::to_vec_pretty(&registry).expect("failed to encode GitHub fixture registry"),
+    )
+    .expect("failed to seed GitHub source for continuation control");
+
+    let script = temp.0.join("fish.completion");
+    completion_script(&temp, "fish", &script);
+    let control_line = "omp-topology update --install-id doctor-profile ";
+    let control = shell_completion_candidates(&temp, "fish", &script, control_line);
+    assert!(
+        completion_has_candidate(&control, "--ref"),
+        "Fish control did not offer --ref for the registered GitHub source; candidates:\n{control}"
+    );
+
+    let continued_line = "omp-topology update --install-id doctor-\\\nprofile ";
+    let continued = shell_completion_candidates(&temp, "fish", &script, continued_line);
+    assert!(
+        completion_has_candidate(&continued, "--ref"),
+        "Fish did not recognize the shell-effective doctor-profile value across backslash-newline continuation; candidates:\n{continued}"
     );
 }
 
