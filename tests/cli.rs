@@ -2041,6 +2041,239 @@ printf 'COMPREPLY:%s\n' "${COMPREPLY[@]}"
 }
 
 #[test]
+fn bash_completion_handles_empty_profile_equals_wordbreak() {
+    let temp = TestDir::new();
+    doctor_fixture(&temp);
+
+    let script = temp.0.join("bash.completion");
+    completion_script(&temp, "bash", &script);
+    let mut command = shell_command(&temp, "bash", &script, "");
+    command.args([
+        "--noprofile",
+        "--norc",
+        "-c",
+        r#"
+source "$OMP_COMPLETION_SCRIPT" || exit 81
+COMP_WORDS=(omp-topology doctor --profile =)
+COMP_CWORD=3
+COMP_LINE="omp-topology doctor --profile="
+COMP_POINT=${#COMP_LINE}
+COMP_TYPE=9
+registration=$(complete -p omp-topology 2>/dev/null) || exit 82
+read -r -a registration_words <<< "$registration"
+completion_function=""
+for ((i = 0; i < ${#registration_words[@]}; i++)); do
+  if [[ "${registration_words[i]}" == "-F" ]]; then
+    completion_function="${registration_words[i + 1]}"
+    break
+  fi
+done
+[[ -n "$completion_function" ]] || exit 83
+"$completion_function"
+printf 'COMPREPLY:%s\n' "${COMPREPLY[@]}"
+"#,
+    ]);
+    let output = command
+        .output()
+        .expect("failed to run Bash empty equals-wordbreak completion probe");
+    assert!(
+        output.status.success(),
+        "Bash completion probe failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.lines().any(|line| line == "COMPREPLY:demo"),
+        "Bash did not return the profile candidate for the empty equals-wordbreak value; probe output:\n{stdout}"
+    );
+    assert!(
+        !stdout.lines().any(|line| line == "COMPREPLY:--profile"),
+        "Bash re-completed the --profile option instead of its empty value; probe output:\n{stdout}"
+    );
+}
+
+#[test]
+fn fish_completion_preserves_newlines_in_profile_prefix_tokens() {
+    let temp = TestDir::new();
+    let source_root = temp.0.join("source");
+    let newline_profile = "line\nbreak-profile";
+    let decoy_profile = "linebreak-decoy";
+    write_cli_fixture_topology(&source_root);
+    for (install_id, profile_name) in [
+        ("newline-profile", newline_profile),
+        ("newline-decoy", decoy_profile),
+    ] {
+        let profile_agent = temp
+            .0
+            .join("home/.omp/profiles")
+            .join(profile_name)
+            .join("agent");
+        install_cli_fixture(
+            &temp,
+            &source_root,
+            install_id,
+            &profile_agent,
+            Some(profile_name),
+        );
+    }
+
+    let mut backend = temp.cli_command(Path::new(env!("CARGO_MANIFEST_DIR")));
+    backend
+        .args(["__complete", "--", "omp-topology", "doctor", "--profile"])
+        .arg("line\n");
+    let backend_output = backend
+        .output()
+        .expect("failed to verify newline profile completion candidate");
+    assert!(
+        backend_output.status.success(),
+        "hidden completion backend failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&backend_output.stdout),
+        String::from_utf8_lossy(&backend_output.stderr)
+    );
+    let backend_candidates = backend_output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|candidate| !candidate.is_empty())
+        .collect::<Vec<_>>();
+    assert!(
+        backend_candidates.contains(&newline_profile.as_bytes()),
+        "hidden completion backend did not provide the newline profile candidate: {backend_candidates:?}"
+    );
+    assert!(
+        !backend_candidates.contains(&decoy_profile.as_bytes()),
+        "hidden completion backend matched the decoy for the newline-containing prefix: {backend_candidates:?}"
+    );
+
+    let script = temp.0.join("fish.completion");
+    completion_script(&temp, "fish", &script);
+    let mut command = shell_command(&temp, "script", &script, "");
+    command
+        .args(["-qefc", "fish --no-config -i", "/dev/null"])
+        .env_remove("CARGO_BIN_EXE_omp-topology")
+        .env(
+            "OMP_COMPLETION_LINE",
+            "omp-topology doctor --profile 'line\n",
+        )
+        .env("TERM", "xterm-256color")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().expect("failed to start Fish under a PTY");
+    let mut input = String::from(
+        r#"source "$OMP_COMPLETION_SCRIPT" || exit 81
+function __omp_inspect_completion
+    commandline -r "$OMP_COMPLETION_LINE"
+    commandline -f complete
+    commandline -r "$OMP_COMPLETION_LINE"
+    set -l candidates (__omp_topology_complete)
+    printf '\n__OMP_ADAPTER_INVOKED__\n'
+    for candidate in $candidates
+        printf '__OMP_CANDIDATE__%s\n' (string escape -- "$candidate")
+    end
+    commandline -r 'exit 0'
+end
+bind \t __omp_inspect_completion || exit 82
+"#,
+    );
+    input.push_str("\t\n");
+    child
+        .stdin
+        .take()
+        .expect("PTY input was not piped")
+        .write_all(input.as_bytes())
+        .expect("failed to send Fish completion input");
+    let output = child
+        .wait_with_output()
+        .expect("failed to collect Fish completion output");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        output.status.success(),
+        "interactive Fish completion probe failed:\nstdout:\n{stdout}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        stdout.contains("__OMP_ADAPTER_INVOKED__"),
+        "interactive Fish did not invoke the generated adapter: PTY output:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("__OMP_CANDIDATE__line\\nbreak-profile"),
+        "Fish adapter did not return the exact profile candidate with an embedded newline in its prefix; PTY output:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("__OMP_CANDIDATE__linebreak-decoy"),
+        "Fish split the newline-containing profile prefix and matched the decoy; PTY output:\n{stdout}"
+    );
+}
+
+#[test]
+fn fish_completion_preserves_newline_in_completed_argument() {
+    let temp = TestDir::new();
+    let source_roots = [temp.0.join("source"), temp.0.join("source\n--config-merge")];
+    for source_root in &source_roots {
+        write_cli_fixture_topology(source_root);
+    }
+
+    let script = temp.0.join("fish.completion");
+    completion_script(&temp, "fish", &script);
+
+    for (case, source_root) in ["control", "newline-path"].into_iter().zip(source_roots) {
+        let source = source_root.to_string_lossy();
+        let line = format!("omp-topology update --source '{source}' --config-r");
+        let mut command = shell_command(&temp, "script", &script, "");
+        command
+            .args(["-qefc", "fish --no-config -i", "/dev/null"])
+            .env_remove("CARGO_BIN_EXE_omp-topology")
+            .env("OMP_COMPLETION_LINE", &line)
+            .env("TERM", "xterm-256color")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = command.spawn().expect("failed to start Fish under a PTY");
+        let mut input = String::from(
+            r#"source "$OMP_COMPLETION_SCRIPT" || exit 81
+function __omp_inspect_completion
+    commandline -r "$OMP_COMPLETION_LINE"
+    set -l candidates (__omp_topology_complete)
+    printf '\n__OMP_ADAPTER_INVOKED__\n'
+    for candidate in $candidates
+        printf '__OMP_CANDIDATE__%s\n' (string escape -- "$candidate")
+    end
+    commandline -r 'exit 0'
+end
+bind \t __omp_inspect_completion || exit 82
+"#,
+        );
+        input.push_str("\t\n");
+        child
+            .stdin
+            .take()
+            .expect("PTY input was not piped")
+            .write_all(input.as_bytes())
+            .expect("failed to send Fish completion input");
+        let output = child
+            .wait_with_output()
+            .expect("failed to collect Fish completion output");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        assert!(
+            output.status.success(),
+            "{case} Fish completion probe failed:\nstdout:\n{stdout}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            stdout.contains("__OMP_ADAPTER_INVOKED__"),
+            "{case} Fish did not invoke the generated adapter: PTY output:\n{stdout}"
+        );
+        assert!(
+            stdout.contains("__OMP_CANDIDATE__--config-replace"),
+            "{case} Fish adapter did not return --config-replace: PTY output:\n{stdout}"
+        );
+    }
+}
+
+#[test]
 fn bash_completion_handles_trailing_space_without_empty_word() {
     let temp = TestDir::new();
     let source_root = temp.0.join("source");

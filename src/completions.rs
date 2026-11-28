@@ -31,8 +31,12 @@ pub(crate) fn script(shell: &str) -> Option<&'static str> {
                 # COMP_WORDBREAKS splits "--option=value-prefix" into
                 # "--option", "=", and the value prefix; drop the standalone
                 # "=" so the engine completes the value prefix as the current
-                # word instead of returning "--option=value".
-                :
+                # word instead of returning "--option=value". When the "=" is
+                # the last word the value prefix is empty, so add an empty
+                # current word for the engine to complete the value against.
+                if (( i + 1 >= ${#words[@]} )); then
+                    normalized_words+=("")
+                fi
             else
                 # A later "=" belongs to the value itself (e.g. "a=b"); rejoin
                 # it with the surrounding words.
@@ -57,8 +61,48 @@ complete -o nosort -o filenames -F _omp_topology_complete omp-topology
         ),
         "fish" => Some(
             r#"function __omp_topology_complete
-    set -l words (commandline -opc)
-    set -l current (commandline -ct)
+    # `commandline -opc` prints one raw token per line, so command
+    # substitution cannot frame a completed token that contains an embedded
+    # newline: the token splits into several words and a line such as
+    # "--config-merge" inside a quoted path would turn into a real option.
+    # In an interactive shell, walk the buffer backwards from the current
+    # token instead, asking fish's tokenizer for the token at each cursor
+    # position (commandline -tC reports the cursor offset inside the token,
+    # so position minus offset is the token's start), and capture each token
+    # value with the same string escape round-trip used below. -pC keeps the
+    # walk inside the current process, matching the old -opc scoping.
+    set -l words
+    set -l cursor (commandline -C 2>/dev/null)
+    if test (count $cursor) -gt 0
+        set -l process_start (math $cursor - (commandline -pC))
+        set -l position (math $cursor - (commandline -tC) - 1)
+        while test $position -ge $process_start
+            commandline -C $position
+            set -l token (commandline -ot | string collect -N)
+            set token (string escape -- "$token")
+            set token (string replace -r -- '\\\\n$' '' "$token")
+            eval "set token $token"
+            if test (count $token) -gt 0
+                set words $token $words
+            end
+            set position (math $position - (commandline -tC) - 1)
+        end
+        commandline -C $cursor
+    else
+        # Cursor access is unavailable outside an interactive reader (e.g.
+        # `complete -C`), and fish exposes no boundary-safe token listing in
+        # that mode, so keep the legacy line-oriented token dump there.
+        set words (commandline -opc)
+    end
+    # `commandline` appends one newline after the current token and command
+    # substitution splits on newlines, which would break a token containing an
+    # embedded newline into several words. Capture the token verbatim, escape
+    # it onto a single line, drop the separator newline's escape sequence, and
+    # let eval restore the exact token (string escape's documented purpose).
+    set -l current (commandline -ot | string collect -N)
+    set current (string escape -- "$current")
+    set current (string replace -r -- '\\\\n$' '' "$current")
+    eval "set current $current"
     if test (count $current) -eq 0
         set current ''
     end
