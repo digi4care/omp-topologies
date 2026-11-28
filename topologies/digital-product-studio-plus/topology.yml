@@ -1,9 +1,0 @@
-# Topology metadata for the omp-topology installer.
-name: digital-product-studio-plus
-version: 1.0.1
-description: >-
-  Planning-focused variant of the six-domain digital product studio, with
-  traceable requirements-to-architecture-to-delivery planning and a read-only
-  OMP acceptance-scope advisor.
-installable: true
-profile: digital-product-studio-plus

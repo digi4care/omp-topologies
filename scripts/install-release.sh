@@ -1,8 +1,8 @@
 #!/bin/sh
-# Fail-closed bootstrap installer for the omp-topology CLI.
+# Fail-closed bootstrap installer for the omp-profile CLI.
 #
 # Downloads the release asset matching the current platform from
-# https://github.com/digi4care/omp-topologies, verifies the release signature
+# https://github.com/digi4care/omp-profile-installer, verifies the release signature
 # and the asset checksum, and only then installs the binary into a
 # user-owned bin directory (no sudo). Safe to re-run for updates: the
 # installed binary is replaced only after every verification step has
@@ -22,15 +22,15 @@
 #
 # Usage:
 #   scripts/install-release.sh [--version TAG] [--bin-dir DIR]
-#   curl -fsSL https://raw.githubusercontent.com/digi4care/omp-topologies/main/scripts/install-release.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/digi4care/omp-profile-installer/main/scripts/install-release.sh | sh
 #
 # Environment overrides:
 #   OMP_TOPOLOGY_VERSION   release tag to install (default: latest), e.g. v0.2.0
 #   OMP_TOPOLOGY_BIN_DIR   install directory (default: ~/.local/bin)
-#   OMP_TOPOLOGY_REPO      owner/repo override (default: digi4care/omp-topologies)
+#   OMP_TOPOLOGY_REPO      owner/repo override (default: digi4care/omp-profile-installer)
 set -eu
 
-REPO="${OMP_TOPOLOGY_REPO:-digi4care/omp-topologies}"
+REPO="${OMP_TOPOLOGY_REPO:-digi4care/omp-profile-installer}"
 VERSION="${OMP_TOPOLOGY_VERSION:-latest}"
 BIN_DIR="${OMP_TOPOLOGY_BIN_DIR:-$HOME/.local/bin}"
 
@@ -132,12 +132,12 @@ if ! printf '%s' "$tag" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9]
 fi
 
 version="${tag#v}"
-asset="omp-topology-${version}-${target}.tar.gz"
+asset="omp-profile-${version}-${target}.tar.gz"
 base="https://github.com/$REPO/releases/download/${tag}"
 
 # --- Download into a private temp directory ---------------------------------
 
-tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/omp-topology-install.XXXXXX")" \
+tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/omp-profile-install.XXXXXX")" \
     || die "could not create a temporary directory"
 candidate=""
 cleanup() {
@@ -196,43 +196,43 @@ openssl dgst -sha256 -verify "$pubkey" -signature "$tmpdir/SHA256SUMS.sig" "$tmp
 
 tar -xzf "$tmpdir/$asset" -C "$tmpdir" \
     || die "failed to extract $asset"
-[ -f "$tmpdir/omp-topology" ] \
-    || die "archive $asset does not contain the omp-topology binary"
+[ -f "$tmpdir/omp-profile" ] \
+    || die "archive $asset does not contain the omp-profile binary"
 
 mkdir -p "$BIN_DIR" || die "could not create install directory $BIN_DIR"
 
 # A directory at the destination would make `mv` nest the candidate inside
 # it instead of replacing it, and the post-install probe would silently
 # report "unknown" — reject it up front.
-if [ -d "$BIN_DIR/omp-topology" ]; then
-    die "$BIN_DIR/omp-topology is a directory; refusing to install over it (remove the directory and re-run)"
+if [ -d "$BIN_DIR/omp-profile" ]; then
+    die "$BIN_DIR/omp-profile is a directory; refusing to install over it (remove the directory and re-run)"
 fi
 
 # Stage the verified candidate inside BIN_DIR first: $TMPDIR may live on a
 # different filesystem, and the final replacement must be a same-directory
 # rename so an existing binary is swapped atomically or left untouched.
-candidate="$(mktemp "$BIN_DIR/.omp-topology.new.XXXXXX")" \
+candidate="$(mktemp "$BIN_DIR/.omp-profile.new.XXXXXX")" \
     || die "could not create a staging file in $BIN_DIR"
-cp "$tmpdir/omp-topology" "$candidate" || die "could not stage $candidate"
+cp "$tmpdir/omp-profile" "$candidate" || die "could not stage $candidate"
 chmod 0755 "$candidate" || die "could not chmod $candidate"
 
 candidate_version="$("$candidate" --version 2>/dev/null)" \
     || die "candidate binary could not run with --version; refusing to replace the installed binary"
-if [ "$candidate_version" != "omp-topology $version" ]; then
-    die "candidate binary reports '${candidate_version:-no version output}', expected 'omp-topology $version'; refusing to replace the installed binary"
+if [ "$candidate_version" != "omp-profile $version" ]; then
+    die "candidate binary reports '${candidate_version:-no version output}', expected 'omp-profile $version'; refusing to replace the installed binary"
 fi
 
-mv -f "$candidate" "$BIN_DIR/omp-topology" \
-    || die "could not replace $BIN_DIR/omp-topology"
+mv -f "$candidate" "$BIN_DIR/omp-profile" \
+    || die "could not replace $BIN_DIR/omp-profile"
 trap - EXIT HUP INT TERM
 rm -rf "$tmpdir"
 
-installed_version="$("$BIN_DIR/omp-topology" --version 2>/dev/null || echo "unknown")"
+installed_version="$("$BIN_DIR/omp-profile" --version 2>/dev/null || echo "unknown")"
 echo "install-release: installed $installed_version"
 echo "install-release: source $REPO@$tag asset $asset (signature and checksum verified)"
-echo "install-release: binary location: $BIN_DIR/omp-topology"
+echo "install-release: binary location: $BIN_DIR/omp-profile"
 
 case ":$PATH:" in
     *":$BIN_DIR:"*) ;;
-    *) echo "install-release: note: $BIN_DIR is not on PATH; add it to use 'omp-topology' directly" ;;
+    *) echo "install-release: note: $BIN_DIR is not on PATH; add it to use 'omp-profile' directly" ;;
 esac

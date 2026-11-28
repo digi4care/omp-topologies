@@ -152,7 +152,7 @@ fn temp_path(path: &Path) -> PathBuf {
         .unwrap_or_else(|| Path::new("."))
         .join(temp_name(
             path.file_name()
-                .unwrap_or_else(|| OsStr::new("omp-topology")),
+                .unwrap_or_else(|| OsStr::new("omp-profile")),
         ))
 }
 

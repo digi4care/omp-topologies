@@ -6,6 +6,10 @@ description = "Install and manage OMP topology profiles"
 license = "Apache-2.0"
 publish = false
 
+[[bin]]
+name = "omp-profile"
+path = "src/main.rs"
+
 [dependencies]
 clap = { version = "4.6", features = ["derive"] }
 clap_complete = { version = "4.6", features = ["unstable-dynamic"] }

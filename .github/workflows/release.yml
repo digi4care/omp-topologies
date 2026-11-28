@@ -1,4 +1,4 @@
-# Publishes a signed GitHub Release for the Rust omp-topology CLI.
+# Publishes a signed GitHub Release for the Rust omp-profile CLI.
 #
 # Trigger: push a SemVer tag, e.g. `git tag v0.2.0 && git push origin v0.2.0`.
 # Full maintainer instructions live in RELEASING.md; this header summarizes
@@ -87,7 +87,7 @@ jobs:
       - name: Verify binary runs and reports its version
         run: |
           set -eu
-          bin="target/${{ matrix.target }}/release/omp-topology"
+          bin="target/${{ matrix.target }}/release/omp-profile"
           test -x "$bin"
           "$bin" --version
 
@@ -98,8 +98,8 @@ jobs:
         run: |
           set -eu
           version="${GITHUB_REF_NAME#v}"
-          asset="omp-topology-${version}-${{ matrix.target }}.tar.gz"
-          tar -C "target/${{ matrix.target }}/release" -czf "$asset" omp-topology
+          asset="omp-profile-${version}-${{ matrix.target }}.tar.gz"
+          tar -C "target/${{ matrix.target }}/release" -czf "$asset" omp-profile
           if [ "$(uname -s)" = "Darwin" ]; then
             shasum -a 256 "$asset"
           else
@@ -109,7 +109,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
-          path: omp-topology-*-${{ matrix.target }}.tar.gz
+          path: omp-profile-*-${{ matrix.target }}.tar.gz
           if-no-files-found: error
 
   release:
@@ -142,7 +142,7 @@ jobs:
 
       - name: Generate SHA256SUMS
         working-directory: dist
-        run: sha256sum omp-topology-*.tar.gz | sort -k 2 > SHA256SUMS
+        run: sha256sum omp-profile-*.tar.gz | sort -k 2 > SHA256SUMS
 
       - name: Sign SHA256SUMS (fail closed on missing/invalid secret)
         env:

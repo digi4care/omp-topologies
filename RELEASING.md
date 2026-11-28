@@ -1,4 +1,4 @@
-# Releasing omp-topology
+# Releasing omp-profile
 
 How maintainers publish a signed GitHub Release, and how the bootstrap
 installer verifies it. Read this before pushing a release tag.
@@ -32,9 +32,9 @@ glibc-specific build.
 All macOS builds run on native runners (`macos-13` was retired in
 December 2025; `macos-15-intel` is available through August 2027).
 
-Every release asset is named `omp-topology-${VERSION}-${TARGET}.tar.gz`
-(for example `omp-topology-0.2.0-x86_64-unknown-linux-musl.tar.gz`) and
-contains a single `omp-topology` binary. `SHA256SUMS` lists these exact
+Every release asset is named `omp-profile-${VERSION}-${TARGET}.tar.gz`
+(for example `omp-profile-0.2.0-x86_64-unknown-linux-musl.tar.gz`) and
+contains a single `omp-profile` binary. `SHA256SUMS` lists these exact
 archive filenames. The release tag is `v${VERSION}` (for example `v0.2.0`),
 and `Cargo.toml`'s `version` must match the tag or the workflow fails.
 
@@ -99,7 +99,7 @@ sh scripts/install-release.sh --version v0.2.0 --bin-dir ~/.local/bin
 Or pipe it directly:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/digi4care/omp-topologies/main/scripts/install-release.sh | sh
+curl -fsSL https://raw.githubusercontent.com/digi4care/omp-profile-installer/main/scripts/install-release.sh | sh
 ```
 
 The installer selects the asset for the current platform (Linux x86_64,
@@ -125,8 +125,8 @@ openssl dgst -sha256 -verify keys/omp-topology-release-public.pem \
 
 # 2. Verify an archive against the manifest.
 #    Linux:
-sha256sum -c <(grep omp-topology-0.2.0-x86_64-unknown-linux-musl.tar.gz SHA256SUMS)
+sha256sum -c <(grep omp-profile-0.2.0-x86_64-unknown-linux-musl.tar.gz SHA256SUMS)
 #    macOS (stock BSD userland has no sha256sum; run in bash/zsh, since
 #    `<(...)` process substitution is not POSIX):
-shasum -a 256 -c <(grep omp-topology-0.2.0-aarch64-apple-darwin.tar.gz SHA256SUMS)
+shasum -a 256 -c <(grep omp-profile-0.2.0-aarch64-apple-darwin.tar.gz SHA256SUMS)
 ```

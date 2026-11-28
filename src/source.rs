@@ -1,7 +1,8 @@
 //! Topology source resolution and caching.
 //!
-//! A source names a topology tree: a directory that contains
-//! `topologies/`. Two source kinds exist:
+//! A source is either one root-level package (`topology.yml` and `agent/`)
+//! or a legacy catalog with `topologies/<slug>/` packages. GitHub sources
+//! are pinned and cached; local sources are canonicalized and used in place.
 //!
 //! * `github:OWNER/REPO` — fetched from GitHub with the Git CLI and pinned
 //!   to a full 40-hex commit SHA. Persistent checkouts are staged into a
@@ -53,12 +54,12 @@ fn staging_name(prefix: &str) -> String {
     format!(".{prefix}-{}-{sequence}", std::process::id())
 }
 
-/// A parsed topology source specification.
+/// A parsed profile-package or legacy-catalog source specification.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TopologySource {
     /// `github:OWNER/REPO`.
     GitHub { owner: String, repo: String },
-    /// A canonicalized local path that contains `topologies/`.
+    /// A canonicalized local path containing a root package or catalog.
     Local { path: PathBuf },
 }
 
@@ -66,14 +67,14 @@ impl TopologySource {
     /// Parse `github:OWNER/REPO` or a local path.
     ///
     /// Local paths are expanded (`~`) and canonicalized here, so a
-    /// [`TopologySource::Local`] always carries an absolute, symlink-free
-    /// path; the `topologies/` tree must exist inside it.
+    /// [`TopologySource::Local`] always carries an absolute path containing
+    /// either a root `topology.yml` package or a `topologies/` catalog.
     pub fn parse(spec: &str) -> Result<TopologySource, CliError> {
         let spec = spec.trim();
         if spec.is_empty() {
             return Err(CliError::Usage(
                 "source must not be empty: use 'github:OWNER/REPO' or a local \
-                 path containing topologies/"
+                 path containing a root topology.yml or a topologies/ catalog"
                     .to_string(),
             ));
         }
@@ -152,24 +153,21 @@ fn parse_github_url(spec: &str) -> Result<TopologySource, CliError> {
     parse_github(spec, rest)
 }
 
-/// Canonicalize a local path and require the topology tree inside it.
+/// Canonicalize a local path and require a root package or catalog.
 fn parse_local(spec: &str) -> Result<TopologySource, CliError> {
     let expanded = fsx::expanduser(Path::new(spec));
     let canonical = std::fs::canonicalize(&expanded).map_err(|err| {
         CliError::Usage(format!(
             "local source '{spec}' does not exist (resolved to {}): {err}; \
-             pass a checkout of the omp-topologies repository or a \
-             'github:OWNER/REPO' source",
+             pass a profile repo or 'github:OWNER/REPO' source",
             expanded.display()
         ))
     })?;
-    let tree = topology::topologies_dir(&canonical);
-    if !tree.is_dir() {
+    if !topology::has_source_layout(&canonical)? {
         return Err(CliError::Usage(format!(
-            "local source '{spec}' is not a topology tree: {} is missing; \
-             pass the repository root (the directory that contains \
-             topologies/)",
-            tree.display()
+            "local source '{spec}' is not a profile or catalog source: {} \
+             contains neither a root topology.yml package nor a topologies/ catalog",
+            canonical.display()
         )));
     }
     Ok(TopologySource::Local { path: canonical })
@@ -648,7 +646,7 @@ fn discard_stale_checkout(dir: &Path) -> Result<bool, CliError> {
 /// [`SourceCheckout`]'s `Drop`. Nothing is written under the cache root.
 fn checkout_ephemeral(owner: &str, repo: &str, commit: &str) -> Result<PathBuf, CliError> {
     let label = format!("github:{owner}/{repo}");
-    let dest = std::env::temp_dir().join(staging_name("omp-topology-dryrun"));
+    let dest = std::env::temp_dir().join(staging_name("omp-profile-dryrun"));
     fsx::makedirs_private(&dest).map_err(|err| io_err(&dest, err))?;
     match git_clone_checkout(&github_url(owner, repo), commit, &dest, &label) {
         Ok(()) => Ok(dest),
@@ -659,18 +657,18 @@ fn checkout_ephemeral(owner: &str, repo: &str, commit: &str) -> Result<PathBuf, 
     }
 }
 
-/// A resolved source: the pinned commit (GitHub only), the root directory
-/// to hand to [`topology::find_topology`]/[`topology::list_topologies`]
-/// (any root containing `topologies/`), the ephemeral staging
-/// directory to clean up for dry runs, and — for persistent GitHub cache
-/// checkouts — the active-use lease that keeps pruning from deleting the
-/// tree while it is being read.
+/// A resolved source: a root-level profile package or legacy catalog, the
+/// pinned commit (GitHub only), the source root to hand to
+/// [`topology::find_topology`]/[`topology::list_topologies`], the ephemeral
+/// staging directory to clean up for dry runs, and — for persistent GitHub
+/// cache checkouts — the active-use lease that keeps pruning from deleting
+/// the tree while it is being read.
 #[derive(Debug)]
 pub struct SourceCheckout {
     pub source: TopologySource,
     /// Full 40-hex commit SHA for GitHub sources; `None` for local sources.
     pub commit: Option<String>,
-    /// Root containing `topologies/`.
+    /// Root containing a profile package or legacy `topologies/` catalog.
     pub root: PathBuf,
     /// Dry-run staging directory; removed on drop.
     staging: Option<PathBuf>,

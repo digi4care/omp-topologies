@@ -10,7 +10,7 @@ use std::process::{Command, Output, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn run_cli(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_omp-topology"))
+    Command::new(env!("CARGO_BIN_EXE_omp-profile"))
         .env_remove("OMP_HOME")
         .env_remove("OMP_PROFILE")
         .env_remove("OMP_TEST_AGENT_DIR")
@@ -20,7 +20,7 @@ fn run_cli(args: &[&str]) -> Output {
         .env_remove("OMP_TEST_EXTERNAL_LOG")
         .args(args)
         .output()
-        .expect("failed to execute omp-topology")
+        .expect("failed to execute omp-profile")
 }
 
 struct TestDir(PathBuf);
@@ -43,7 +43,7 @@ impl TestDir {
         fs::create_dir_all(&home).expect("failed to create isolated HOME");
         fs::create_dir_all(&xdg_config).expect("failed to create isolated XDG_CONFIG_HOME");
 
-        let mut command = Command::new(env!("CARGO_BIN_EXE_omp-topology"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_omp-profile"));
         command
             .current_dir(cwd)
             .env_remove("OMP_HOME")
@@ -124,7 +124,7 @@ fn cli_rejects_legacy_update_alias_before_state_or_target_access() {
     command.env("XDG_STATE_HOME", &blocked_state_home);
     temp.configure_fake_omp(&mut command, &default_agent_dir, true);
 
-    let output = command.output().expect("failed to execute omp-topology");
+    let output = command.output().expect("failed to execute omp-profile");
     assert_eq!(
         output.status.code(),
         Some(2),
@@ -133,7 +133,7 @@ fn cli_rejects_legacy_update_alias_before_state_or_target_access() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("Usage:")
-            && stderr.contains("omp-topology update")
+            && stderr.contains("omp-profile update")
             && stderr.contains("unexpected argument")
             && stderr.contains("--alias"),
         "removed update --alias was not rejected as an unknown clap argument:\n{stderr}"
@@ -174,7 +174,7 @@ fn version_prints_exact_package_version() {
 
     let stdout = String::from_utf8(output.stdout).expect("--version output was not UTF-8");
     assert!(
-        stdout.trim_end() == concat!("omp-topology ", env!("CARGO_PKG_VERSION")),
+        stdout.trim_end() == concat!("omp-profile ", env!("CARGO_PKG_VERSION")),
         "unexpected --version output: {stdout:?}"
     );
 }
@@ -210,7 +210,9 @@ fn install_dry_run_reports_shell_alias_without_creating_it() {
     command.args([
         "install",
         "--topology",
-        "digital-product-studio",
+        "omp-profile-example",
+        "--source",
+        "omp-profile-example/profile",
         "--profile",
         "demo",
         "--alias",
@@ -219,7 +221,7 @@ fn install_dry_run_reports_shell_alias_without_creating_it() {
     ]);
     temp.configure_fake_omp(&mut command, &profile_agent, false);
 
-    let output = command.output().expect("failed to execute omp-topology");
+    let output = command.output().expect("failed to execute omp-profile");
     assert!(
         output.status.success(),
         "install --dry-run failed: {output:?}"
@@ -298,7 +300,7 @@ fn status_does_not_create_missing_profile_directory() {
     command.args(["status", "--profile", "regression", "--json"]);
     temp.configure_fake_omp(&mut command, &profile_agent, true);
 
-    let output = command.output().expect("failed to execute omp-topology");
+    let output = command.output().expect("failed to execute omp-profile");
     assert!(output.status.success(), "status failed: {output:?}");
     assert!(
         !profile_agent.exists(),
@@ -321,7 +323,7 @@ fn remove_dry_run_does_not_create_missing_profile_directory() {
     ]);
     temp.configure_fake_omp(&mut command, &profile_agent, true);
 
-    let output = command.output().expect("failed to execute omp-topology");
+    let output = command.output().expect("failed to execute omp-profile");
     assert!(
         output.status.success(),
         "remove --dry-run failed: {output:?}"
@@ -339,7 +341,7 @@ fn doctor_command_is_registered() {
     command.args(["doctor", "--json"]);
     configure_doctor_omp(&temp, &mut command, &profile_agent, None, false);
 
-    let output = command.output().expect("failed to execute omp-topology");
+    let output = command.output().expect("failed to execute omp-profile");
     assert!(output.status.success(), "doctor --json failed: {output:?}");
     let report: serde_json::Value = serde_json::from_slice(&output.stdout)
         .expect("doctor --json did not emit one JSON document");
@@ -356,7 +358,7 @@ fn completion_command_is_registered() {
         .cli_command(Path::new(env!("CARGO_MANIFEST_DIR")))
         .args(["completions", "bash"])
         .output()
-        .expect("failed to execute omp-topology");
+        .expect("failed to execute omp-profile");
 
     assert!(
         output.status.success(),
@@ -376,11 +378,11 @@ fn hidden_completion_preserves_non_utf8_agent_dir_candidate_bytes() {
     fs::create_dir(&candidate).expect("failed to create non-UTF-8 agent directory");
     let prefix = temp.0.join("candidate-");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_omp-topology"))
-        .args(["__complete", "--", "omp-topology", "doctor", "--agent-dir"])
+    let output = Command::new(env!("CARGO_BIN_EXE_omp-profile"))
+        .args(["__complete", "--", "omp-profile", "doctor", "--agent-dir"])
         .arg(&prefix)
         .output()
-        .expect("failed to execute omp-topology __complete");
+        .expect("failed to execute omp-profile __complete");
 
     assert!(
         output.status.success(),
@@ -409,11 +411,11 @@ fn hidden_completion_preserves_newline_agent_dir_candidate_bytes() {
     fs::create_dir(&candidate).expect("failed to create newline agent directory");
     let prefix = temp.0.join("candidate-");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_omp-topology"))
-        .args(["__complete", "--", "omp-topology", "doctor", "--agent-dir"])
+    let output = Command::new(env!("CARGO_BIN_EXE_omp-profile"))
+        .args(["__complete", "--", "omp-profile", "doctor", "--agent-dir"])
         .arg(&prefix)
         .output()
-        .expect("failed to execute omp-topology __complete");
+        .expect("failed to execute omp-profile __complete");
 
     assert!(
         output.status.success(),
@@ -1352,7 +1354,7 @@ fn completion_script(temp: &TestDir, shell: &str, script_path: &Path) {
 }
 
 fn completion_runtime_path(temp: &TestDir) -> std::ffi::OsString {
-    let binary = Path::new(env!("CARGO_BIN_EXE_omp-topology"));
+    let binary = Path::new(env!("CARGO_BIN_EXE_omp-profile"));
     let mut entries = vec![
         binary
             .parent()
@@ -1395,7 +1397,7 @@ fn zsh_completion_candidates(temp: &TestDir, script: &Path, line: &str) -> Strin
     let zsh_dir = temp.0.join("zsh-fpath");
     fs::create_dir_all(temp.0.join("zsh-home")).expect("failed to create isolated Zsh home");
     fs::create_dir_all(&zsh_dir).expect("failed to create temporary Zsh fpath");
-    fs::copy(script, zsh_dir.join("_omp-topology"))
+    fs::copy(script, zsh_dir.join("_omp-profile"))
         .expect("failed to stage Zsh completion in temporary fpath");
     let mut command = shell_command(temp, "zsh", script, line);
     command
@@ -1430,7 +1432,7 @@ fn zsh_completion_inserted_words(temp: &TestDir, script: &Path, line: &str) -> S
     let zsh_dir = temp.0.join("zsh-insert-fpath");
     fs::create_dir_all(temp.0.join("zsh-home")).expect("failed to create isolated Zsh home");
     fs::create_dir_all(&zsh_dir).expect("failed to create temporary Zsh fpath");
-    fs::copy(script, zsh_dir.join("_omp-topology"))
+    fs::copy(script, zsh_dir.join("_omp-profile"))
         .expect("failed to stage Zsh completion in temporary fpath");
     let mut command = shell_command(temp, "zsh", script, line);
     command
@@ -1476,7 +1478,7 @@ COMP_TYPE=9
 read -r -a COMP_WORDS <<< "$COMP_LINE"
 if [[ "$COMP_LINE" == *" " ]]; then COMP_WORDS+=(""); fi
 COMP_CWORD=$((${#COMP_WORDS[@]} - 1))
-registration=$(complete -p omp-topology 2>/dev/null) || exit 82
+registration=$(complete -p omp-profile 2>/dev/null) || exit 82
 read -r -a registration_words <<< "$registration"
 completion_function=""
 for ((i = 0; i < ${#registration_words[@]}; i++)); do
@@ -1657,84 +1659,84 @@ fn completion_actual_bash_fish_zsh_candidates_filter_invalid_combinations() {
         let script = completion_dir.join(format!("{shell}.completion"));
         completion_script(&temp, shell, &script);
         let queries: &[(&str, &[&str], &[&str])] = &[
-            ("omp-topology ", &["doctor", "completions"], &["powershell"]),
+            ("omp-profile ", &["doctor", "completions"], &["powershell"]),
             (
-                "omp-topology completions ",
+                "omp-profile completions ",
                 &["bash", "fish", "zsh"],
                 &["powershell"],
             ),
             (
-                "omp-topology doctor ",
+                "omp-profile doctor ",
                 &["--install-id", "--profile", "--agent-dir", "--json"],
                 &[],
             ),
             (
-                "omp-topology doctor --profile demo ",
+                "omp-profile doctor --profile demo ",
                 &["--json"],
                 &["--install-id", "--agent-dir"],
             ),
             (
-                "omp-topology doctor --json --install-id doctor-profile ",
+                "omp-profile doctor --json --install-id doctor-profile ",
                 &[],
                 &["--profile", "--agent-dir"],
             ),
             (
-                "omp-topology doctor --install-id ",
+                "omp-profile doctor --install-id ",
                 &["doctor-profile", "doctor-explicit"],
                 &["unknown-install"],
             ),
             (
-                "omp-topology doctor --profile ",
+                "omp-profile doctor --profile ",
                 &["demo"],
                 &["missing-profile"],
             ),
             (
-                "omp-topology install --topology fixture --profile demo ",
+                "omp-profile install --topology fixture --profile demo ",
                 &["--alias"],
                 &["--agent-dir"],
             ),
             (
-                "omp-topology install --topology fixture --agent-dir /tmp/target ",
+                "omp-profile install --topology fixture --agent-dir /tmp/target ",
                 &[],
                 &["--profile", "--alias"],
             ),
             (
-                "omp-topology install --topology fixture --config-merge ",
+                "omp-profile install --topology fixture --config-merge ",
                 &["--config-precedence"],
                 &["--config-replace"],
             ),
             (
-                "omp-topology install --topology fixture --config-replace ",
+                "omp-profile install --topology fixture --config-replace ",
                 &[],
                 &["--config-merge", "--config-precedence"],
             ),
             (
-                "omp-topology install --topology fixture ",
+                "omp-profile install --topology fixture ",
                 &["--source"],
                 &["--ref"],
             ),
             (
-                "omp-topology install --topology fixture --source /tmp/source ",
+                "omp-profile install --topology fixture --source /tmp/source ",
                 &["--ref"],
                 &[],
             ),
             (
-                "omp-topology update --install-id doctor-profile ",
+                "omp-profile update --install-id doctor-profile ",
                 &["--source"],
                 &["--ref"],
             ),
             (
-                "omp-topology update --install-id doctor-profile --source /tmp/source ",
+                "omp-profile update --install-id doctor-profile --source /tmp/source ",
                 &[],
                 &["--ref"],
             ),
             (
-                "omp-topology status --install-id doctor-profile ",
+                "omp-profile status --install-id doctor-profile ",
                 &[],
                 &["--profile", "--agent-dir"],
             ),
             (
-                "omp-topology remove --install-id doctor-profile ",
+                "omp-profile remove --install-id doctor-profile ",
                 &[],
                 &["--profile", "--agent-dir"],
             ),
@@ -1810,24 +1812,24 @@ fn completion_update_ref_tracks_effective_source_for_all_shells() {
     let source_arg = source_root.to_string_lossy().into_owned();
     let cases = [
         (
-            "omp-topology update --install-id doctor-profile ".to_string(),
+            "omp-profile update --install-id doctor-profile ".to_string(),
             true,
             "registered GitHub source without override",
         ),
         (
-            "omp-topology update --install-id doctor-explicit ".to_string(),
+            "omp-profile update --install-id doctor-explicit ".to_string(),
             false,
             "registered local source without override",
         ),
         (
-            "omp-topology update --install-id doctor-explicit --source github:test-owner/test-repo "
+            "omp-profile update --install-id doctor-explicit --source github:test-owner/test-repo "
                 .to_string(),
             true,
             "explicit GitHub source override",
         ),
         (
             format!(
-                "omp-topology update --install-id doctor-profile --source {source_arg} "
+                "omp-profile update --install-id doctor-profile --source {source_arg} "
             ),
             false,
             "explicit local source override",
@@ -1896,7 +1898,7 @@ fn bash_completion_preserves_profile_names_with_spaces() {
 
     let script = temp.0.join("bash.completion");
     completion_script(&temp, "bash", &script);
-    let raw = shell_completion_candidates(&temp, "bash", &script, "omp-topology doctor --profile ");
+    let raw = shell_completion_candidates(&temp, "bash", &script, "omp-profile doctor --profile ");
 
     assert_eq!(
         raw,
@@ -1946,7 +1948,7 @@ fn bash_completion_quotes_profile_on_actual_insertion() {
         "  READLINE_POINT=${#READLINE_LINE}\n",
         "}\n",
         "bind -x '\"\\C-x\\C-x\":__omp_inspect_completion' || exit 82\n",
-        "omp-topology doctor --profile pro\t\x18\x18\n",
+        "omp-profile doctor --profile pro\t\x18\x18\n",
     );
     child
         .stdin
@@ -2003,13 +2005,13 @@ fn bash_completion_handles_profile_equals_wordbreak() {
         "-c",
         r#"
 source "$OMP_COMPLETION_SCRIPT" || exit 81
-COMP_WORDS=(omp-topology doctor --profile = des)
+COMP_WORDS=(omp-profile doctor --profile = des)
 COMP_CWORD=4
-COMP_LINE="omp-topology doctor --profile=des"
+COMP_LINE="omp-profile doctor --profile=des"
 COMP_POINT=${#COMP_LINE}
 COMP_TYPE=9
 [[ ${#COMP_WORDS[@]} -eq 5 && "${COMP_WORDS[3]}" == "=" && "${COMP_WORDS[4]}" == "des" ]] || exit 87
-registration=$(complete -p omp-topology 2>/dev/null) || exit 82
+registration=$(complete -p omp-profile 2>/dev/null) || exit 82
 read -r -a registration_words <<< "$registration"
 completion_function=""
 for ((i = 0; i < ${#registration_words[@]}; i++)); do
@@ -2055,12 +2057,12 @@ fn bash_completion_handles_empty_profile_equals_wordbreak() {
         "-c",
         r#"
 source "$OMP_COMPLETION_SCRIPT" || exit 81
-COMP_WORDS=(omp-topology doctor --profile =)
+COMP_WORDS=(omp-profile doctor --profile =)
 COMP_CWORD=3
-COMP_LINE="omp-topology doctor --profile="
+COMP_LINE="omp-profile doctor --profile="
 COMP_POINT=${#COMP_LINE}
 COMP_TYPE=9
-registration=$(complete -p omp-topology 2>/dev/null) || exit 82
+registration=$(complete -p omp-profile 2>/dev/null) || exit 82
 read -r -a registration_words <<< "$registration"
 completion_function=""
 for ((i = 0; i < ${#registration_words[@]}; i++)); do
@@ -2100,14 +2102,14 @@ fn bash_completion_after_empty_profile_value_completes_next_argument() {
 
     let script = temp.0.join("bash.completion");
     completion_script(&temp, "bash", &script);
-    let mut command = shell_command(&temp, "bash", &script, "omp-topology doctor --profile= ");
+    let mut command = shell_command(&temp, "bash", &script, "omp-profile doctor --profile= ");
     command.args([
         "--noprofile",
         "--norc",
         "-c",
         r#"
 source "$OMP_COMPLETION_SCRIPT" || exit 81
-registration=$(complete -p omp-topology 2>/dev/null) || exit 82
+registration=$(complete -p omp-profile 2>/dev/null) || exit 82
 read -r -a registration_words <<< "$registration"
 completion_function=""
 for ((i = 0; i < ${#registration_words[@]}; i++)); do
@@ -2116,28 +2118,28 @@ for ((i = 0; i < ${#registration_words[@]}; i++)); do
     break
   fi
 done
-[[ "$completion_function" == "_omp_topology_complete" ]] || exit 83
+[[ "$completion_function" == "_omp_profile_complete" ]] || exit 83
 
-COMP_LINE='omp-topology doctor --profile='
+COMP_LINE='omp-profile doctor --profile='
 COMP_POINT=${#COMP_LINE}
-COMP_WORDS=(omp-topology doctor --profile =)
+COMP_WORDS=(omp-profile doctor --profile =)
 COMP_CWORD=3
 COMP_TYPE=9
 "$completion_function"
 printf 'CONTROL:%s\n' "${COMPREPLY[@]}"
 
-COMP_LINE='omp-topology doctor --profile= '
+COMP_LINE='omp-profile doctor --profile= '
 COMP_POINT=${#COMP_LINE}
-COMP_WORDS=(omp-topology doctor --profile = "")
+COMP_WORDS=(omp-profile doctor --profile = "")
 COMP_CWORD=4
 COMP_TYPE=9
 [[ ${#COMP_WORDS[@]} -eq 5 && $COMP_CWORD -eq 4 && "${COMP_WORDS[3]}" == "=" && -z "${COMP_WORDS[4]}" ]] || exit 87
 "$completion_function"
 printf 'ADAPTER:%s\n' "$completion_function"
 printf 'COMPREPLY:%s\n' "${COMPREPLY[@]}"
-COMP_LINE='omp-topology doctor --profile= --j'
+COMP_LINE='omp-profile doctor --profile= --j'
 COMP_POINT=${#COMP_LINE}
-COMP_WORDS=(omp-topology doctor --profile = --j)
+COMP_WORDS=(omp-profile doctor --profile = --j)
 COMP_CWORD=4
 COMP_TYPE=9
 "$completion_function"
@@ -2162,7 +2164,7 @@ printf 'PREFIX_COMPREPLY:%s\n' "${COMPREPLY[@]}"
     assert!(
         stdout
             .lines()
-            .any(|line| line == "ADAPTER:_omp_topology_complete"),
+            .any(|line| line == "ADAPTER:_omp_profile_complete"),
         "generated Bash adapter did not run; probe output:\n{stdout}"
     );
     assert!(
@@ -2176,7 +2178,7 @@ printf 'PREFIX_COMPREPLY:%s\n' "${COMPREPLY[@]}"
     assert!(
         stdout
             .lines()
-            .any(|line| line == "PREFIX_ADAPTER:_omp_topology_complete"),
+            .any(|line| line == "PREFIX_ADAPTER:_omp_profile_complete"),
         "generated Bash adapter did not run for the prefixed option; probe output:\n{stdout}"
     );
     assert!(
@@ -2216,7 +2218,7 @@ fn bash_completion_handles_github_url_wordbreaks() {
 source "$OMP_COMPLETION_SCRIPT" || exit 81
 COMP_WORDBREAKS=$' \t\n"\'@><=;|&(:/'
 [[ "$COMP_WORDBREAKS" == *:* && "$COMP_WORDBREAKS" == */* ]] || exit 84
-registration=$(complete -p omp-topology 2>/dev/null) || exit 82
+registration=$(complete -p omp-profile 2>/dev/null) || exit 82
 read -r -a registration_words <<< "$registration"
 completion_function=""
 for ((i = 0; i < ${#registration_words[@]}; i++)); do
@@ -2227,22 +2229,22 @@ for ((i = 0; i < ${#registration_words[@]}; i++)); do
 done
 [[ -n "$completion_function" ]] || exit 83
 
-COMP_LINE='omp-topology update --install-id doctor-profile '
+COMP_LINE='omp-profile update --install-id doctor-profile '
 COMP_POINT=${#COMP_LINE}
 COMP_TYPE=9
-COMP_WORDS=(omp-topology update --install-id doctor-profile)
+COMP_WORDS=(omp-profile update --install-id doctor-profile)
 COMP_CWORD=${#COMP_WORDS[@]}
 "$completion_function"
 printf 'CONTROL:%s\n' "${COMPREPLY[@]}"
-COMP_LINE='omp-topology update --install-id doctor-profile --source /tmp/local '
+COMP_LINE='omp-profile update --install-id doctor-profile --source /tmp/local '
 COMP_POINT=${#COMP_LINE}
-COMP_WORDS=(omp-topology update --install-id doctor-profile --source /tmp/local)
+COMP_WORDS=(omp-profile update --install-id doctor-profile --source /tmp/local)
 COMP_CWORD=${#COMP_WORDS[@]}
 "$completion_function"
 printf 'LOCAL:%s\n' "${COMPREPLY[@]}"
 
 
-COMP_LINE='omp-topology update --install-id doctor-profile --source=https://github.com/acme/repo '
+COMP_LINE='omp-profile update --install-id doctor-profile --source=https://github.com/acme/repo '
 COMP_POINT=${#COMP_LINE}
 COMP_WORDS=()
 word=''
@@ -2261,7 +2263,7 @@ for ((i = 0; i < ${#COMP_LINE}; i++)); do
 done
 [[ -z "$word" ]] || COMP_WORDS+=("$word")
 COMP_CWORD=${#COMP_WORDS[@]}
-[[ "${COMP_WORDS[*]}" == 'omp-topology update --install-id doctor-profile --source = https : / / github.com / acme / repo' ]] || exit 85
+[[ "${COMP_WORDS[*]}" == 'omp-profile update --install-id doctor-profile --source = https : / / github.com / acme / repo' ]] || exit 85
 "$completion_function"
 printf 'URL:%s\n' "${COMPREPLY[@]}"
 printf '__OMP_ADAPTER_INVOKED__\n'
@@ -2323,7 +2325,7 @@ fn fish_completion_preserves_newlines_in_profile_prefix_tokens() {
 
     let mut backend = temp.cli_command(Path::new(env!("CARGO_MANIFEST_DIR")));
     backend
-        .args(["__complete", "--", "omp-topology", "doctor", "--profile"])
+        .args(["__complete", "--", "omp-profile", "doctor", "--profile"])
         .arg("line\n");
     let backend_output = backend
         .output()
@@ -2353,10 +2355,10 @@ fn fish_completion_preserves_newlines_in_profile_prefix_tokens() {
     let mut command = shell_command(&temp, "script", &script, "");
     command
         .args(["-qefc", "fish --no-config -i", "/dev/null"])
-        .env_remove("CARGO_BIN_EXE_omp-topology")
+        .env_remove("CARGO_BIN_EXE_omp-profile")
         .env(
             "OMP_COMPLETION_LINE",
-            "omp-topology doctor --profile 'line\n",
+            "omp-profile doctor --profile 'line\n",
         )
         .env("TERM", "xterm-256color")
         .stdin(Stdio::piped())
@@ -2369,7 +2371,7 @@ function __omp_inspect_completion
     commandline -r "$OMP_COMPLETION_LINE"
     commandline -f complete
     commandline -r "$OMP_COMPLETION_LINE"
-    set -l candidates (__omp_topology_complete)
+    set -l candidates (__omp_profile_complete)
     printf '\n__OMP_ADAPTER_INVOKED__\n'
     for candidate in $candidates
         printf '__OMP_CANDIDATE__%s\n' (string escape -- "$candidate")
@@ -2424,11 +2426,11 @@ fn fish_completion_preserves_newline_in_completed_argument() {
 
     for (case, source_root) in ["control", "newline-path"].into_iter().zip(source_roots) {
         let source = source_root.to_string_lossy();
-        let line = format!("omp-topology update --source '{source}' --config-r");
+        let line = format!("omp-profile update --source '{source}' --config-r");
         let mut command = shell_command(&temp, "script", &script, "");
         command
             .args(["-qefc", "fish --no-config -i", "/dev/null"])
-            .env_remove("CARGO_BIN_EXE_omp-topology")
+            .env_remove("CARGO_BIN_EXE_omp-profile")
             .env("OMP_COMPLETION_LINE", &line)
             .env("TERM", "xterm-256color")
             .stdin(Stdio::piped())
@@ -2439,7 +2441,7 @@ fn fish_completion_preserves_newline_in_completed_argument() {
             r#"source "$OMP_COMPLETION_SCRIPT" || exit 81
 function __omp_inspect_completion
     commandline -r "$OMP_COMPLETION_LINE"
-    set -l candidates (__omp_topology_complete)
+    set -l candidates (__omp_profile_complete)
     printf '\n__OMP_ADAPTER_INVOKED__\n'
     for candidate in $candidates
         printf '__OMP_CANDIDATE__%s\n' (string escape -- "$candidate")
@@ -2490,7 +2492,7 @@ fn fish_noninteractive_completion_preserves_newline_in_completed_argument() {
 
     let control_source = source_roots[0].to_string_lossy();
     let control_line = format!(
-        "omp-topology install --topology cli-contract-fixture --source '{control_source}' "
+        "omp-profile install --topology cli-contract-fixture --source '{control_source}' "
     );
     let control = shell_completion_candidates(&temp, "fish", &script, &control_line);
     assert!(
@@ -2504,7 +2506,7 @@ fn fish_noninteractive_completion_preserves_newline_in_completed_argument() {
 
     let newline_source = source_roots[1].to_string_lossy();
     let newline_line = format!(
-        "omp-topology install --topology cli-contract-fixture --source '{newline_source}' "
+        "omp-profile install --topology cli-contract-fixture --source '{newline_source}' "
     );
     let newline_candidates = shell_completion_candidates(&temp, "fish", &script, &newline_line);
     assert!(
@@ -2522,7 +2524,7 @@ fn fish_noninteractive_completion_keeps_command_substitution_as_one_token() {
     let script = temp.0.join("fish.completion");
     completion_script(&temp, "fish", &script);
 
-    let control_line = "omp-topology install --topology cli-contract-fixture --source /tmp/source ";
+    let control_line = "omp-profile install --topology cli-contract-fixture --source /tmp/source ";
     let control = shell_completion_candidates(&temp, "fish", &script, control_line);
     assert!(
         completion_has_candidate(&control, "--config-replace"),
@@ -2533,7 +2535,7 @@ fn fish_noninteractive_completion_keeps_command_substitution_as_one_token() {
         "Fish control offered --config-precedence without --config-merge; candidates:\n{control}"
     );
 
-    let substitution_line = "omp-topology install --topology cli-contract-fixture --source (printf '%s' --config-merge ) ";
+    let substitution_line = "omp-profile install --topology cli-contract-fixture --source (printf '%s' --config-merge ) ";
     let substitution = shell_completion_candidates(&temp, "fish", &script, substitution_line);
     assert!(
         completion_has_candidate(&substitution, "--config-replace"),
@@ -2552,7 +2554,7 @@ fn fish_noninteractive_comment_in_substitution_preserves_option_filtering() {
 
     let wrapper_dir = temp.0.join("completion-bin");
     fs::create_dir_all(&wrapper_dir).expect("failed to create completion wrapper directory");
-    let wrapper = wrapper_dir.join("omp-topology");
+    let wrapper = wrapper_dir.join("omp-profile");
     fs::write(
         &wrapper,
         "#!/bin/sh\n\
@@ -2564,15 +2566,15 @@ fn fish_noninteractive_comment_in_substitution_preserves_option_filtering() {
         .expect("failed to make completion adapter marker executable");
 
     let adapter_log = temp.0.join("completion-adapter.log");
-    let real_cli = env!("CARGO_BIN_EXE_omp-topology");
+    let real_cli = env!("CARGO_BIN_EXE_omp-profile");
     let runtime_path = completion_runtime_path(&temp);
     let path = std::env::join_paths(
         std::iter::once(wrapper_dir).chain(std::env::split_paths(&runtime_path)),
     )
     .expect("failed to build completion wrapper PATH");
     let control_line =
-        "omp-topology install --topology cli-contract-fixture --source (printf '%s' ) ";
-    let comment_line = "omp-topology install --topology cli-contract-fixture --source (printf '%s' --config-merge # ) --config-merge \"\n) ";
+        "omp-profile install --topology cli-contract-fixture --source (printf '%s' ) ";
+    let comment_line = "omp-profile install --topology cli-contract-fixture --source (printf '%s' --config-merge # ) --config-merge \"\n) ";
 
     let run_fish_completion = |line: &str| {
         let mut command = shell_command(&temp, "fish", &script, line);
@@ -2650,14 +2652,14 @@ fn fish_noninteractive_completion_removes_backslash_newline_continuation() {
 
     let script = temp.0.join("fish.completion");
     completion_script(&temp, "fish", &script);
-    let control_line = "omp-topology update --install-id doctor-profile ";
+    let control_line = "omp-profile update --install-id doctor-profile ";
     let control = shell_completion_candidates(&temp, "fish", &script, control_line);
     assert!(
         completion_has_candidate(&control, "--ref"),
         "Fish control did not offer --ref for the registered GitHub source; candidates:\n{control}"
     );
 
-    let continued_line = "omp-topology update --install-id doctor-\\\nprofile ";
+    let continued_line = "omp-profile update --install-id doctor-\\\nprofile ";
     let continued = shell_completion_candidates(&temp, "fish", &script, continued_line);
     assert!(
         completion_has_candidate(&continued, "--ref"),
@@ -2686,7 +2688,7 @@ fn bash_completion_handles_trailing_space_without_empty_word() {
 
     let script = temp.0.join("bash.completion");
     completion_script(&temp, "bash", &script);
-    let mut command = shell_command(&temp, "bash", &script, "omp-topology doctor --profile ");
+    let mut command = shell_command(&temp, "bash", &script, "omp-profile doctor --profile ");
     command.args([
         "--noprofile",
         "--norc",
@@ -2700,8 +2702,8 @@ read -r -a COMP_WORDS <<< "$COMP_LINE"
 COMP_CWORD=${#COMP_WORDS[@]}
 [[ "$COMP_LINE" == *" " ]] || exit 84
 [[ ${#COMP_WORDS[@]} -eq COMP_CWORD ]] || exit 85
-[[ "${COMP_WORDS[*]}" == "omp-topology doctor --profile" ]] || exit 86
-registration=$(complete -p omp-topology 2>/dev/null) || exit 82
+[[ "${COMP_WORDS[*]}" == "omp-profile doctor --profile" ]] || exit 86
+registration=$(complete -p omp-profile 2>/dev/null) || exit 82
 read -r -a registration_words <<< "$registration"
 completion_function=""
 for ((i = 0; i < ${#registration_words[@]}; i++)); do
@@ -2765,13 +2767,13 @@ fn bash_completion_ignores_words_after_cursor() {
             "-c",
             r#"
 source "$OMP_COMPLETION_SCRIPT" || exit 81
-COMP_WORDS=(omp-topology doctor --profile "" --agent-dir "$OMP_COMPLETION_TAIL_PATH")
+COMP_WORDS=(omp-profile doctor --profile "" --agent-dir "$OMP_COMPLETION_TAIL_PATH")
 COMP_CWORD=3
-COMP_LINE="omp-topology doctor --profile \"\" --agent-dir $OMP_COMPLETION_TAIL_PATH"
-cursor_prefix='omp-topology doctor --profile ""'
+COMP_LINE="omp-profile doctor --profile \"\" --agent-dir $OMP_COMPLETION_TAIL_PATH"
+cursor_prefix='omp-profile doctor --profile ""'
 COMP_POINT=${#cursor_prefix}
 COMP_TYPE=9
-registration=$(complete -p omp-topology 2>/dev/null) || exit 82
+registration=$(complete -p omp-profile 2>/dev/null) || exit 82
 read -r -a registration_words <<< "$registration"
 completion_function=""
 for ((i = 0; i < ${#registration_words[@]}; i++)); do
@@ -2824,7 +2826,7 @@ fn bash_completion_does_not_overwrite_global_candidate() {
 
     let script = temp.0.join("bash.completion");
     completion_script(&temp, "bash", &script);
-    let mut command = shell_command(&temp, "bash", &script, "omp-topology doctor --profile ");
+    let mut command = shell_command(&temp, "bash", &script, "omp-profile doctor --profile ");
     command.args([
         "--noprofile",
         "--norc",
@@ -2837,7 +2839,7 @@ COMP_TYPE=9
 read -r -a COMP_WORDS <<< "$COMP_LINE"
 if [[ "$COMP_LINE" == *" " ]]; then COMP_WORDS+=(""); fi
 COMP_CWORD=$((${#COMP_WORDS[@]} - 1))
-registration=$(complete -p omp-topology 2>/dev/null) || exit 82
+registration=$(complete -p omp-profile 2>/dev/null) || exit 82
 read -r -a registration_words <<< "$registration"
 completion_function=""
 for ((i = 0; i < ${#registration_words[@]}; i++)); do
@@ -2896,7 +2898,7 @@ fn zsh_completion_inserts_profile_names_with_spaces_as_one_word() {
 
     let script = temp.0.join("zsh.completion");
     completion_script(&temp, "zsh", &script);
-    let output = zsh_completion_inserted_words(&temp, &script, "omp-topology doctor --profile ");
+    let output = zsh_completion_inserted_words(&temp, &script, "omp-profile doctor --profile ");
 
     assert!(
         output.contains("__OMP_WORD_COUNT__4"),

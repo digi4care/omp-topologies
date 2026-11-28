@@ -31,7 +31,7 @@ A skipped job is not evidence for that domain.
 | Domain | Changed in this PR? | Evidence |
 |---|---|---|
 | Rust sources, Cargo manifests/lockfile, toolchain, `.cargo/`, Rust gate script/workflow |  |  |
-| `topologies/<slug>/` payload or manifest |  |  |
+| External legacy catalog package (`topologies/<slug>/`) |  |  |
 | Documentation only |  |  |
 
 <!-- For changed topologies, name each slug and report discovery and dry-run results. -->

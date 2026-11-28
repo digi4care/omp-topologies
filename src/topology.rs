@@ -1,11 +1,9 @@
-//! Topology discovery rooted in a topology source tree.
+//! Topology package discovery from source repositories.
 //!
-//! Topologies live in `topologies/<name>` of some source tree.
-//! For the current repository checkout that tree is located with
-//! [`repo_root`]; resolved remote or local sources (`source.rs`) yield any
-//! other root containing the same `topologies/` layout, and the
-//! lookup/list/source-file APIs below accept either. Source resolution and
-//! caching itself lives in `source.rs`.
+//! A source is either one profile package at its root (`topology.yml` and
+//! `agent/`) or a legacy catalog containing `topologies/<name>/` packages.
+//! Resolution and cache management live in `source.rs`.
+
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -17,67 +15,14 @@ use crate::fsx;
 use crate::value::{self, Value};
 use crate::yamlwork;
 
-/// Locate the repository root by looking for `topologies/`.
-///
-/// Discovery never consults the current working directory, so a relocated
-/// or installed binary run inside an unrelated project cannot pick up that
-/// project's tree. Candidates, in order:
-///
-/// 1. The compile-time package root (`CARGO_MANIFEST_DIR`), which holds the
-///    topology tree for `cargo run` / `cargo test` and checked-out builds.
-/// 2. The executable's ancestry (the built binary lives in
-///    `target/{debug,release}` inside the checkout).
-///
-/// A candidate is only accepted when the tree actually exists inside it;
-/// otherwise a clear, actionable error is returned.
-pub fn repo_root() -> Result<PathBuf, CliError> {
-    fn root_from(start: &Path) -> Option<PathBuf> {
-        let mut candidate = start;
-        loop {
-            if candidate.join("topologies").is_dir() {
-                return Some(candidate.to_path_buf());
-            }
-            candidate = candidate.parent()?;
-        }
-    }
-
-    let manifest_root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    if let Some(root) = root_from(manifest_root) {
-        return Ok(root);
-    }
-    let exe = std::env::current_exe().map_err(|err| {
-        CliError::Usage(format!(
-            "could not locate the omp-topologies source tree: {err}"
-        ))
-    })?;
-    if let Some(exe_dir) = exe.parent()
-        && let Some(root) = root_from(exe_dir)
-    {
-        return Ok(root);
-    }
-    Err(CliError::Usage(format!(
-        "could not locate the omp-topologies source tree: neither the build-time \
-         package root ('{}') nor any ancestor of this executable ('{}') contains \
-         'topologies'; run the installer from within the omp-topologies \
-         checkout or reinstall it from that repository",
-        manifest_root.display(),
-        exe.display()
-    )))
-}
-
-/// The topology tree (`topologies/`) inside any source-tree root:
-/// the current checkout ([`repo_root`]) or a resolved source checkout.
-pub fn topologies_dir(tree_root: &Path) -> PathBuf {
-    tree_root.join("topologies")
-}
 
 /// The topology tree with every component beneath `tree_root` validated as
 /// a real, non-symlink directory entry.
 ///
-/// `tree_root` itself arrives canonicalized (local sources, [`repo_root`],
-/// validated cache checkouts), but `topologies` beneath it could still be
-/// a planted symlink. A symlinked component is rejected with an error —
-/// never followed — so listing and lookup can never be redirected outside
+/// `tree_root` itself arrives canonicalized (local sources and validated
+/// cache checkouts), but `topologies` beneath it could still be a planted
+/// symlink. A symlinked component is rejected with an error — never followed —
+/// so listing and lookup can never be redirected outside
 /// the source tree. A missing component is not a symlink and passes
 /// through; downstream callers handle absent trees as before.
 fn checked_topologies_dir(tree_root: &Path) -> Result<PathBuf, CliError> {
@@ -90,6 +35,52 @@ fn checked_topologies_dir(tree_root: &Path) -> Result<PathBuf, CliError> {
         )));
     }
     Ok(dir)
+}
+/// A source can be one root package or a legacy topology catalog.
+#[derive(Debug)]
+enum SourceLayout {
+    RootPackage,
+    Catalog(PathBuf),
+    Missing,
+}
+
+/// Identify a source layout without following a symlinked catalog path.
+/// Repositories that contain both formats are ambiguous and fail closed.
+fn source_layout(tree_root: &Path) -> Result<SourceLayout, CliError> {
+    let catalog = checked_topologies_dir(tree_root)?;
+    let has_catalog = match std::fs::symlink_metadata(&catalog) {
+        Ok(metadata) if metadata.file_type().is_dir() => true,
+        Ok(_) => {
+            return Err(CliError::Topology(format!(
+                "topology catalog path {} is not a directory",
+                catalog.display()
+            )));
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => false,
+        Err(err) => return Err(io_err(&catalog, err)),
+    };
+    let package_manifest = tree_root.join("topology.yml");
+    let has_root_package = match std::fs::symlink_metadata(&package_manifest) {
+        Ok(_) => true,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => false,
+        Err(err) => return Err(io_err(&package_manifest, err)),
+    };
+
+    match (has_root_package, has_catalog) {
+        (true, true) => Err(CliError::Topology(format!(
+            "source root {} contains both a root topology.yml package and a \
+             topologies/ catalog; refusing ambiguous source",
+            tree_root.display()
+        ))),
+        (true, false) => Ok(SourceLayout::RootPackage),
+        (false, true) => Ok(SourceLayout::Catalog(catalog)),
+        (false, false) => Ok(SourceLayout::Missing),
+    }
+}
+
+/// Whether a canonical local source contains either supported package layout.
+pub fn has_source_layout(tree_root: &Path) -> Result<bool, CliError> {
+    Ok(!matches!(source_layout(tree_root)?, SourceLayout::Missing))
 }
 
 /// `true` for names like `digital-product-studio` (lowercase slug).
@@ -141,17 +132,10 @@ pub fn topology_metadata(topology_dir: &Path) -> Result<Value, CliError> {
     Ok(model)
 }
 
-/// Resolve a topology name to its directory inside a source-tree root
-/// (current checkout via [`repo_root`] or a resolved source checkout),
-/// validating the slug, the declared metadata name, and (optionally)
-/// installability. The `topologies` component beneath `tree_root` and the
-/// final topology directory are each validated as real,
-/// non-symlink directories and rejected rather than followed, so a planted
-/// link can never redirect reads outside the source tree. When no
-/// directory is named exactly like the slug, resolution falls back to the
-/// directory whose declared `name` metadata field matches, so every entry
-/// [`list_topologies`] advertises stays selectable; a slug-named directory
-/// always takes precedence over a declared-name match.
+/// Resolve a topology name to its directory inside a source root, validating
+/// the slug, declared metadata name, and (optionally) installability. A
+/// source may be a root-level package or a legacy `topologies/` catalog.
+/// Catalog/package directories are never followed through symlinks.
 pub fn find_topology(
     tree_root: &Path,
     name: &str,
@@ -163,40 +147,48 @@ pub fn find_topology(
              'digital-product-studio'"
         )));
     }
-    let topologies_dir = checked_topologies_dir(tree_root)?;
-    let topology_dir = topologies_dir.join(name);
-    if fsx::is_symlink(&topology_dir) {
-        return Err(CliError::Topology(format!(
-            "topology '{name}' resolves to a symlinked directory ({}); \
-             refusing to follow it, remove the link and retry",
-            topology_dir.display()
-        )));
-    }
-    // A directory named exactly like the slug takes precedence. When no
-    // such directory exists, fall back to the name `list_topologies`
-    // advertises: the declared `name` metadata field, which may differ
-    // from the directory name. A listed entry must stay selectable.
-    let topology_dir = if !topology_dir.is_dir() {
-        match topology_by_declared_name(&topologies_dir, name)? {
-            Some(dir) => dir,
-            None => {
-                return Err(CliError::Usage(format!(
-                    "unknown topology '{name}' (looked in {})",
-                    topologies_dir.display()
+
+    let (topology_dir, root_package) = match source_layout(tree_root)? {
+        SourceLayout::RootPackage => (tree_root.to_path_buf(), true),
+        SourceLayout::Catalog(topologies_dir) => {
+            let topology_dir = topologies_dir.join(name);
+            if fsx::is_symlink(&topology_dir) {
+                return Err(CliError::Topology(format!(
+                    "topology '{name}' resolves to a symlinked directory ({}); \
+                     refusing to follow it, remove the link and retry",
+                    topology_dir.display()
                 )));
             }
+            let topology_dir = if !topology_dir.is_dir() {
+                match topology_by_declared_name(&topologies_dir, name)? {
+                    Some(dir) => dir,
+                    None => {
+                        return Err(CliError::Usage(format!(
+                            "unknown topology '{name}' (looked in {})",
+                            topologies_dir.display()
+                        )));
+                    }
+                }
+            } else {
+                topology_dir
+            };
+            (topology_dir, false)
         }
-    } else {
-        topology_dir
+        SourceLayout::Missing => {
+            return Err(CliError::Usage(format!(
+                "unknown topology '{name}': source {} contains neither a \
+                 root topology.yml package nor a topologies/ catalog",
+                tree_root.display()
+            )));
+        }
     };
     let meta = topology_metadata(&topology_dir)?;
-    // Accept exactly the name `list_topologies` displays for this
-    // directory: the rendered `name` metadata field when present, else
-    // the directory name. A topology that appears in `list` must be
-    // resolvable here; only a genuinely different declared name is an
-    // error.
+    // Accept exactly the name `list_topologies` displays for this source.
+    // A root package has no directory slug to use as a fallback, so its
+    // manifest must declare the package name explicitly.
     let declared = match model_field(&meta, "name") {
         Some(value) => value::display_metadata(Some(value)),
+        None if root_package => String::new(),
         None => topology_dir
             .file_name()
             .and_then(|dir_name| dir_name.to_str())
@@ -205,7 +197,7 @@ pub fn find_topology(
     };
     if declared != name {
         return Err(CliError::Topology(format!(
-            "topology directory '{name}' declares name '{declared}' in topology.yml"
+            "topology source declares name '{declared}', not '{name}'"
         )));
     }
     if require_installable && !matches!(model_field(&meta, "installable"), Some(Value::Bool(true)))
@@ -250,19 +242,41 @@ fn topology_by_declared_name(
     Ok(None)
 }
 
-/// All installable topologies inside a source-tree root, sorted by
-/// directory name, as `(name, version, description)` with metadata-style
-/// string rendering. The `topologies` component beneath
-/// `tree_root` must be a real directory — a symlinked component is
-/// rejected, not followed. Symlinked topology directories are skipped,
-/// never followed.
+/// All installable topologies inside a source root, sorted by catalog
+/// directory name. A root-level package yields exactly its declared
+/// `(name, version, description)`. Catalog/package symlinks are never
+/// followed; roots containing both layouts are rejected as ambiguous.
 pub fn list_topologies(tree_root: &Path) -> Result<Vec<(String, String, String)>, CliError> {
     let mut results = Vec::new();
-    let root = checked_topologies_dir(tree_root)?;
-    let entries = match std::fs::read_dir(&root) {
+    let catalog = match source_layout(tree_root)? {
+        SourceLayout::RootPackage => {
+            let meta = topology_metadata(tree_root)?;
+            if !matches!(model_field(&meta, "installable"), Some(Value::Bool(true))) {
+                return Ok(results);
+            }
+            let name = meta_name(&meta);
+            if !is_slug(&name) {
+                return Err(CliError::Topology(format!(
+                    "root topology.yml must declare a valid slug name; found '{name}'"
+                )));
+            }
+            let version = meta_version(&meta);
+            results.push((
+                name,
+                if version.is_empty() { "?".to_string() } else { version },
+                model_field(&meta, "description")
+                    .map(|value| value::display_metadata(Some(value)))
+                    .unwrap_or_default(),
+            ));
+            return Ok(results);
+        }
+        SourceLayout::Catalog(catalog) => catalog,
+        SourceLayout::Missing => return Ok(results),
+    };
+    let entries = match std::fs::read_dir(&catalog) {
         Ok(entries) => entries,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(results),
-        Err(err) => return Err(io_err(&root, err)),
+        Err(err) => return Err(io_err(&catalog, err)),
     };
     let mut dirs: Vec<PathBuf> = entries
         .filter_map(|entry| entry.ok().map(|e| e.path()))
