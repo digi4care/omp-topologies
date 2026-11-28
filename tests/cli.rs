@@ -3,6 +3,7 @@ use std::fs;
 use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -2092,6 +2093,97 @@ printf 'COMPREPLY:%s\n' "${COMPREPLY[@]}"
         "Bash re-completed the --profile option instead of its empty value; probe output:\n{stdout}"
     );
 }
+#[test]
+fn bash_completion_after_empty_profile_value_completes_next_argument() {
+    let temp = TestDir::new();
+    doctor_fixture(&temp);
+
+    let script = temp.0.join("bash.completion");
+    completion_script(&temp, "bash", &script);
+    let mut command = shell_command(&temp, "bash", &script, "omp-topology doctor --profile= ");
+    command.args([
+        "--noprofile",
+        "--norc",
+        "-c",
+        r#"
+source "$OMP_COMPLETION_SCRIPT" || exit 81
+registration=$(complete -p omp-topology 2>/dev/null) || exit 82
+read -r -a registration_words <<< "$registration"
+completion_function=""
+for ((i = 0; i < ${#registration_words[@]}; i++)); do
+  if [[ "${registration_words[i]}" == "-F" ]]; then
+    completion_function="${registration_words[i + 1]}"
+    break
+  fi
+done
+[[ "$completion_function" == "_omp_topology_complete" ]] || exit 83
+
+COMP_LINE='omp-topology doctor --profile='
+COMP_POINT=${#COMP_LINE}
+COMP_WORDS=(omp-topology doctor --profile =)
+COMP_CWORD=3
+COMP_TYPE=9
+"$completion_function"
+printf 'CONTROL:%s\n' "${COMPREPLY[@]}"
+
+COMP_LINE='omp-topology doctor --profile= '
+COMP_POINT=${#COMP_LINE}
+COMP_WORDS=(omp-topology doctor --profile = "")
+COMP_CWORD=4
+COMP_TYPE=9
+[[ ${#COMP_WORDS[@]} -eq 5 && $COMP_CWORD -eq 4 && "${COMP_WORDS[3]}" == "=" && -z "${COMP_WORDS[4]}" ]] || exit 87
+"$completion_function"
+printf 'ADAPTER:%s\n' "$completion_function"
+printf 'COMPREPLY:%s\n' "${COMPREPLY[@]}"
+COMP_LINE='omp-topology doctor --profile= --j'
+COMP_POINT=${#COMP_LINE}
+COMP_WORDS=(omp-topology doctor --profile = --j)
+COMP_CWORD=4
+COMP_TYPE=9
+"$completion_function"
+printf 'PREFIX_ADAPTER:%s\n' "$completion_function"
+printf 'PREFIX_COMPREPLY:%s\n' "${COMPREPLY[@]}"
+"#,
+    ]);
+    let output = command
+        .output()
+        .expect("failed to run Bash empty-value-followed-by-current-word probe");
+    assert!(
+        output.status.success(),
+        "Bash completion probe failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.lines().any(|line| line == "CONTROL:demo"),
+        "Bash control did not distinguish an empty current profile value; probe output:\n{stdout}"
+    );
+    assert!(
+        stdout
+            .lines()
+            .any(|line| line == "ADAPTER:_omp_topology_complete"),
+        "generated Bash adapter did not run; probe output:\n{stdout}"
+    );
+    assert!(
+        stdout.lines().any(|line| line == "COMPREPLY:--json"),
+        "Bash did not offer the next-argument candidate after the empty completed profile value; probe output:\n{stdout}"
+    );
+    assert!(
+        !stdout.lines().any(|line| line == "COMPREPLY:demo"),
+        "Bash offered a profile name for the next argument; probe output:\n{stdout}"
+    );
+    assert!(
+        stdout
+            .lines()
+            .any(|line| line == "PREFIX_ADAPTER:_omp_topology_complete"),
+        "generated Bash adapter did not run for the prefixed option; probe output:\n{stdout}"
+    );
+    assert!(
+        stdout.lines().any(|line| line == "PREFIX_COMPREPLY:--json"),
+        "Bash did not offer --json for --profile= --j; probe output:\n{stdout}"
+    );
+}
 
 #[test]
 fn bash_completion_handles_github_url_wordbreaks() {
@@ -2450,6 +2542,90 @@ fn fish_noninteractive_completion_keeps_command_substitution_as_one_token() {
     assert!(
         !completion_has_candidate(&substitution, "--config-precedence"),
         "Fish treated --config-merge inside one command-substitution token as an option; candidates:\n{substitution}"
+    );
+}
+#[test]
+fn fish_noninteractive_comment_in_substitution_preserves_option_filtering() {
+    let temp = TestDir::new();
+    let script = temp.0.join("fish.completion");
+    completion_script(&temp, "fish", &script);
+
+    let wrapper_dir = temp.0.join("completion-bin");
+    fs::create_dir_all(&wrapper_dir).expect("failed to create completion wrapper directory");
+    let wrapper = wrapper_dir.join("omp-topology");
+    fs::write(
+        &wrapper,
+        "#!/bin/sh\n\
+         printf 'ADAPTER:%s\\n' \"$*\" >> \"$OMP_COMPLETION_ADAPTER_LOG\"\n\
+         exec \"$OMP_COMPLETION_REAL_CLI\" \"$@\"\n",
+    )
+    .expect("failed to write completion adapter marker");
+    fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755))
+        .expect("failed to make completion adapter marker executable");
+
+    let adapter_log = temp.0.join("completion-adapter.log");
+    let real_cli = env!("CARGO_BIN_EXE_omp-topology");
+    let runtime_path = completion_runtime_path(&temp);
+    let path = std::env::join_paths(
+        std::iter::once(wrapper_dir).chain(std::env::split_paths(&runtime_path)),
+    )
+    .expect("failed to build completion wrapper PATH");
+    let control_line =
+        "omp-topology install --topology cli-contract-fixture --source (printf '%s' ) ";
+    let comment_line = "omp-topology install --topology cli-contract-fixture --source (printf '%s' --config-merge # ) --config-merge \"\n) ";
+
+    let run_fish_completion = |line: &str| {
+        let mut command = shell_command(&temp, "fish", &script, line);
+        command
+            .env("PATH", &path)
+            .env("OMP_COMPLETION_REAL_CLI", real_cli)
+            .env("OMP_COMPLETION_ADAPTER_LOG", &adapter_log)
+            .args([
+                "--no-config",
+                "-c",
+                r#"source "$OMP_COMPLETION_SCRIPT"; complete -C "$OMP_COMPLETION_LINE""#,
+            ]);
+        let output = command
+            .output()
+            .expect("failed to run Fish noninteractive completion probe");
+        assert!(
+            output.status.success(),
+            "Fish completion probe failed for {line:?}:\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+
+    let control = run_fish_completion(control_line);
+    assert!(
+        completion_has_candidate(&control, "--config-replace"),
+        "Fish control did not offer --config-replace; candidates:\n{control}"
+    );
+    assert!(
+        !completion_has_candidate(&control, "--config-precedence"),
+        "Fish control offered --config-precedence without --config-merge; candidates:\n{control}"
+    );
+
+    let comment_candidates = run_fish_completion(comment_line);
+    assert!(
+        completion_has_candidate(&comment_candidates, "--config-replace"),
+        "Fish treated --config-merge in the command-substitution comment as an option and suppressed --config-replace; candidates:\n{comment_candidates}"
+    );
+    assert!(
+        !completion_has_candidate(&comment_candidates, "--config-precedence"),
+        "Fish treated --config-merge in the command-substitution comment as an option; candidates:\n{comment_candidates}"
+    );
+
+    let adapter_calls =
+        fs::read_to_string(&adapter_log).expect("generated Fish adapter did not invoke the CLI");
+    assert!(
+        adapter_calls.contains("ADAPTER:__complete --"),
+        "generated Fish adapter marker was not observed; calls:\n{adapter_calls}"
+    );
+    assert!(
+        adapter_calls.contains("--config-merge"),
+        "the comment-bearing substitution did not reach the adapter; calls:\n{adapter_calls}"
     );
 }
 

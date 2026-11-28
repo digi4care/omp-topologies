@@ -68,6 +68,14 @@ pub(crate) fn script(shell: &str) -> Option<&'static str> {
                 words+=("$token")
                 token=''
                 started=0
+            elif (( ${#words[@]} > 1 )) && [[ ${words[$((${#words[@]} - 1))]} == "=" && ${words[$((${#words[@]} - 2))]} == -* ]]; then
+                # An unquoted whitespace delimiter after a standalone "="
+                # that follows an option completes an empty attached value
+                # ("--option= <TAB>" or "--option= --next<TAB>"). Keep the
+                # empty value as its own word so the normalization below
+                # preserves it and the engine does not mistake the next
+                # current word for the option's value.
+                words+=("")
             fi
         elif [[ $char == '=' ]]; then
             if (( started )); then
@@ -83,7 +91,14 @@ pub(crate) fn script(shell: &str) -> Option<&'static str> {
     done
     if (( started )); then
         words+=("$token")
-    else
+    elif [[ $line == *' ' || $line == *$'\t' || $line == *$'\n' ]]; then
+        # The line ends with a separator, so the current word is empty. A
+        # completed "--option=" right before that separator has an empty
+        # value: add it as its own word so the engine receives the
+        # completed value and the new current word as two empty arguments.
+        if (( ${#words[@]} > 0 )) && [[ ${words[$((${#words[@]} - 1))]} == "=" ]]; then
+            words+=("")
+        fi
         words+=("")
     fi
     words=("${words[@]:1}")
@@ -168,7 +183,10 @@ complete -o nosort -o filenames -F _omp_topology_complete omp-topology
         # quotes and backslashes escape the next character, a
         # backslash-newline continuation removes both characters (inside
         # double quotes too), and `#` at the start of a token comments out
-        # the rest - so every completed token keeps its exact framing.
+        # the rest of the line - inside a command substitution the comment
+        # ends at the newline without ending the substitution, so its
+        # quotes and parentheses never change nesting or tokenization -
+        # so every completed token keeps its exact framing.
         # Variables, command substitutions, and wildcards stay unexpanded;
         # option filtering only needs the literal tokens. A trailing
         # unterminated token is the one being completed and is appended
@@ -180,6 +198,8 @@ complete -o nosort -o filenames -F _omp_topology_complete omp-topology
         set -l depth 0
         set -l token ''
         set -l started 0
+        set -l comment 0
+        set -l boundary 1
         while test $index -le $raw_length
             # Command substitution frames on newlines, so a newline character
             # comes back as two empty elements; detect and restore it.
@@ -187,7 +207,16 @@ complete -o nosort -o filenames -F _omp_topology_complete omp-topology
             if test (count $char) -gt 1
                 set char \n
             end
-            if test -n "$quote"
+            if test $comment -eq 1
+                # A comment inside a command substitution runs to the end
+                # of the line; the newline ends the comment but not the
+                # substitution, and the comment's quotes and parentheses
+                # never change nesting or tokenization.
+                if test "$char" = \n
+                    set comment 0
+                end
+            else if test -n "$quote"
+                set boundary 0
                 if test "$char" = "$quote"
                     set quote ''
                 else if test "$char" = '\\'
@@ -222,7 +251,9 @@ complete -o nosort -o filenames -F _omp_topology_complete omp-topology
             else if test "$char" = "'" -o "$char" = '"'
                 set quote "$char"
                 set started 1
+                set boundary 0
             else if test "$char" = '\\'
+                set boundary 0
                 set index (math $index + 1)
                 if test $index -le $raw_length
                     set -l next (string sub -s $index -l 1 -- "$raw")
@@ -244,13 +275,16 @@ complete -o nosort -o filenames -F _omp_topology_complete omp-topology
                 set depth (math $depth + 1)
                 set token "$token$char"
                 set started 1
+                set boundary 1
             else if test "$char" = ')'
                 if test $depth -gt 0
                     set depth (math $depth - 1)
                 end
                 set token "$token$char"
                 set started 1
+                set boundary 1
             else if test "$char" = ' ' -o "$char" = \t -o "$char" = \n
+                set boundary 1
                 if test $depth -gt 0
                     # Whitespace inside a command substitution stays in the
                     # token: the substitution is one word to the shell.
@@ -260,11 +294,16 @@ complete -o nosort -o filenames -F _omp_topology_complete omp-topology
                     set token ''
                     set started 0
                 end
-            else if test "$char" = '#' -a $started -eq 0
+            else if test "$char" = '#' -a $started -eq 0 -a $depth -eq 0
                 break
+            else if test "$char" = '#' -a $boundary -eq 1
+                # Inside a command substitution `#` at a token boundary
+                # starts a comment that runs to the end of the line.
+                set comment 1
             else
                 set token "$token$char"
                 set started 1
+                set boundary 0
             end
             set index (math $index + 1)
         end
