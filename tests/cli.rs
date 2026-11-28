@@ -2274,6 +2274,46 @@ bind \t __omp_inspect_completion || exit 82
 }
 
 #[test]
+fn fish_noninteractive_completion_preserves_newline_in_completed_argument() {
+    let temp = TestDir::new();
+    let source_roots = [temp.0.join("source"), temp.0.join("source\n--config-merge")];
+    for source_root in &source_roots {
+        write_cli_fixture_topology(source_root);
+    }
+
+    let script = temp.0.join("fish.completion");
+    completion_script(&temp, "fish", &script);
+
+    let control_source = source_roots[0].to_string_lossy();
+    let control_line = format!(
+        "omp-topology install --topology cli-contract-fixture --source '{control_source}' "
+    );
+    let control = shell_completion_candidates(&temp, "fish", &script, &control_line);
+    assert!(
+        completion_has_candidate(&control, "--config-replace"),
+        "Fish did not offer --config-replace for the valid control input; candidates:\n{control}"
+    );
+    assert!(
+        !completion_has_candidate(&control, "--config-precedence"),
+        "Fish offered --config-precedence without --config-merge for the valid control input; candidates:\n{control}"
+    );
+
+    let newline_source = source_roots[1].to_string_lossy();
+    let newline_line = format!(
+        "omp-topology install --topology cli-contract-fixture --source '{newline_source}' "
+    );
+    let newline_candidates = shell_completion_candidates(&temp, "fish", &script, &newline_line);
+    assert!(
+        !completion_has_candidate(&newline_candidates, "--config-precedence"),
+        "Fish split the embedded newline in the completed --source token into a separate --config-merge option; candidates:\n{newline_candidates}"
+    );
+    assert!(
+        completion_has_candidate(&newline_candidates, "--config-replace"),
+        "Fish did not offer --config-replace for the newline-bearing --source token; candidates:\n{newline_candidates}"
+    );
+}
+
+#[test]
 fn bash_completion_handles_trailing_space_without_empty_word() {
     let temp = TestDir::new();
     let source_root = temp.0.join("source");

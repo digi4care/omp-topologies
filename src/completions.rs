@@ -73,7 +73,10 @@ complete -o nosort -o filenames -F _omp_topology_complete omp-topology
     # walk inside the current process, matching the old -opc scoping.
     set -l words
     set -l cursor (commandline -C 2>/dev/null)
-    if test (count $cursor) -gt 0
+    # Reading the cursor can succeed under `complete -C` on newer fish even
+    # though moving it is rejected there, so probe with a no-op move before
+    # choosing the cursor walk.
+    if test (count $cursor) -gt 0; and commandline -C $cursor 2>/dev/null
         set -l process_start (math $cursor - (commandline -pC))
         set -l position (math $cursor - (commandline -tC) - 1)
         while test $position -ge $process_start
@@ -89,10 +92,90 @@ complete -o nosort -o filenames -F _omp_topology_complete omp-topology
         end
         commandline -C $cursor
     else
-        # Cursor access is unavailable outside an interactive reader (e.g.
-        # `complete -C`), and fish exposes no boundary-safe token listing in
-        # that mode, so keep the legacy line-oriented token dump there.
-        set words (commandline -opc)
+        # Outside an interactive reader (e.g. `complete -C`) fish rejects
+        # cursor moves, so the walk cannot run, and `commandline -opc`
+        # prints one raw token per line, which cannot frame a completed
+        # token containing an embedded newline. Tokenize the raw process
+        # text instead: `commandline -pc` reports it as one string (string
+        # collect keeps it a single element), and the loop below applies
+        # fish's quoting rules - whitespace ends a token, single quotes are
+        # literal, double quotes and backslashes escape the next character,
+        # and `#` at the start of a token comments out the rest - so every
+        # completed token keeps its exact framing. Variables, command
+        # substitutions, and wildcards stay unexpanded; option filtering
+        # only needs the literal tokens. A trailing unterminated token is
+        # the one being completed and is appended below via commandline -ot.
+        set -l raw (commandline -pc | string collect)
+        set -l index 1
+        set -l raw_length (string length -- "$raw")
+        set -l quote ''
+        set -l token ''
+        set -l started 0
+        while test $index -le $raw_length
+            # Command substitution frames on newlines, so a newline character
+            # comes back as two empty elements; detect and restore it.
+            set -l char (string sub -s $index -l 1 -- "$raw")
+            if test (count $char) -gt 1
+                set char \n
+            end
+            if test -n "$quote"
+                if test "$char" = "$quote"
+                    set quote ''
+                else if test "$char" = '\\'
+                    set index (math $index + 1)
+                    if test $index -le $raw_length
+                        set -l next (string sub -s $index -l 1 -- "$raw")
+                        if test (count $next) -gt 1
+                            set next \n
+                        end
+                        if test "$quote" = "'"
+                            if test "$next" = "'" -o "$next" = '\\'
+                                set token "$token$next"
+                            else
+                                set token "$token\\$next"
+                            end
+                        else
+                            if test "$next" = '"' -o "$next" = '\\' -o "$next" = '$'
+                                set token "$token$next"
+                            else
+                                set token "$token\\$next"
+                            end
+                        end
+                    else
+                        set token "$token\\"
+                    end
+                else
+                    set token "$token$char"
+                end
+            else if test "$char" = "'" -o "$char" = '"'
+                set quote "$char"
+                set started 1
+            else if test "$char" = '\\'
+                set index (math $index + 1)
+                if test $index -le $raw_length
+                    set -l next (string sub -s $index -l 1 -- "$raw")
+                    if test (count $next) -gt 1
+                        set next \n
+                    end
+                    set token "$token$next"
+                else
+                    set token "$token\\"
+                end
+                set started 1
+            else if test "$char" = ' ' -o "$char" = \t -o "$char" = \n
+                if test $started -eq 1
+                    set words $words "$token"
+                    set token ''
+                    set started 0
+                end
+            else if test "$char" = '#' -a $started -eq 0
+                break
+            else
+                set token "$token$char"
+                set started 1
+            end
+            set index (math $index + 1)
+        end
     end
     # `commandline` appends one newline after the current token and command
     # substitution splits on newlines, which would break a token containing an
